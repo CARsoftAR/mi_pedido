@@ -10,60 +10,84 @@ class ConfiguracionPage extends StatefulWidget {
 }
 
 class _ConfiguracionPageState extends State<ConfiguracionPage> {
-  // Datos del Local
   final TextEditingController _nombreController = TextEditingController(text: 'Pizzería Gonzalo');
   final TextEditingController _direccionController = TextEditingController();
-
-  // Central de Precios
+  final TextEditingController _horarioController = TextEditingController();
+  final TextEditingController _demoraController = TextEditingController();
+  final TextEditingController _deliveryController = TextEditingController();
+  
   final TextEditingController _unidadComunController = TextEditingController();
   final TextEditingController _docenaComunController = TextEditingController();
   final TextEditingController _unidadEspecialController = TextEditingController();
   final TextEditingController _docenaEspecialController = TextEditingController();
 
-  // Logística
-  final TextEditingController _demoraController = TextEditingController();
-  final TextEditingController _deliveryController = TextEditingController();
-
   bool _isSaving = false;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarConfiguracion();
+  }
+
+  String _formatPrice(dynamic value) {
+    double val = 0;
+    if (value is num) {
+      val = value.toDouble();
+    } else if (value is String) {
+      val = double.tryParse(value.replaceAll(',', '.')) ?? 0;
+    }
+    return val.toStringAsFixed(2).replaceAll('.', ',');
+  }
+
+  double _parsePrice(String text) {
+    return double.tryParse(text.trim().replaceAll(',', '.')) ?? 0;
+  }
+
+  void _cargarConfiguracion() async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        setState(() {
+          _nombreController.text = data['nombre'] ?? 'Pizzería Gonzalo';
+          _direccionController.text = data['direccion'] ?? '';
+          _horarioController.text = data['horario'] ?? '';
+          _demoraController.text = data['tiempo_demora'] ?? '';
+          _deliveryController.text = _formatPrice(data['precio_delivery']);
+          
+          _unidadComunController.text = _formatPrice(data['unidad_comun']);
+          _docenaComunController.text = _formatPrice(data['docena_comun']);
+          _unidadEspecialController.text = _formatPrice(data['unidad_especial']);
+          _docenaEspecialController.text = _formatPrice(data['docena_especial']);
+        });
+      }
+    } catch (e) {
+      debugPrint("Error al cargar configuración: $e");
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
 
   void _guardarConfiguracion() async {
     setState(() => _isSaving = true);
-    
     try {
       final Map<String, dynamic> data = {
         'nombre': _nombreController.text.trim(),
         'direccion': _direccionController.text.trim(),
-        'unidad_comun': double.tryParse(_unidadComunController.text) ?? 0,
-        'docena_comun': double.tryParse(_docenaComunController.text) ?? 0,
-        'unidad_especial': double.tryParse(_unidadEspecialController.text) ?? 0,
-        'docena_especial': double.tryParse(_docenaEspecialController.text) ?? 0,
-        'tiempo_demora': int.tryParse(_demoraController.text) ?? 0,
-        'precio_delivery': double.tryParse(_deliveryController.text) ?? 0,
+        'horario': _horarioController.text.trim(),
+        'tiempo_demora': _demoraController.text.trim(),
+        'precio_delivery': _parsePrice(_deliveryController.text),
+        'unidad_comun': _parsePrice(_unidadComunController.text),
+        'docena_comun': _parsePrice(_docenaComunController.text),
+        'unidad_especial': _parsePrice(_unidadEspecialController.text),
+        'docena_especial': _parsePrice(_docenaEspecialController.text),
         'updated_at': FieldValue.serverTimestamp(),
       };
-
-      await FirebaseFirestore.instance
-          .collection('configuracion_local')
-          .doc('precios')
-          .set(data, SetOptions(merge: true));
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Configuración guardada exitosamente'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set(data, SetOptions(merge: true));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuración guardada correctamente'), backgroundColor: Colors.green));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al guardar: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al guardar: $e'), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -71,106 +95,164 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: const Color(0xFFF9F9F9),
       appBar: AppBar(
-        title: Text(
-          'Configuración Local',
-          style: GoogleFonts.outfit(
-            color: const Color(0xFFD32F2F),
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
+        title: Text("Ajustes del Negocio", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18)),
         centerTitle: true,
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Sección Datos del Local
-            _buildSectionTitle('Datos del Local'),
+            // DASHBOARD PREMIUM (Cierre de Caja)
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance.collection('pedidos').where('estado', isEqualTo: 'Finalizado').snapshots(),
+              builder: (context, snapshot) {
+                double totalHoy = 0;
+                int countHoy = 0;
+                if (snapshot.hasData) {
+                  final now = DateTime.now();
+                  final today = DateTime(now.year, now.month, now.day);
+                  for (var doc in snapshot.data!.docs) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final Timestamp? ts = data['updatedAt'];
+                    if (ts != null) {
+                      final date = ts.toDate();
+                      if (date.isAfter(today)) {
+                        totalHoy += (data['total'] ?? 0).toDouble();
+                        countHoy++;
+                      }
+                    }
+                  }
+                }
+                return _buildDashboard(totalHoy, countHoy);
+              },
+            ),
+            const SizedBox(height: 25),
+            
+            _buildSectionTitle("Datos del Local"),
             _buildCard([
-              _buildTextField('Nombre del Negocio', _nombreController, Icons.store),
-              _buildTextField('Dirección del Local', _direccionController, Icons.location_on),
+              _buildTextField("Nombre", _nombreController, Icons.store),
+              _buildTextField("Dirección", _direccionController, Icons.map),
+              _buildTextField("Horario de Atención", _horarioController, Icons.access_time),
+              Row(
+                children: [
+                  Expanded(child: _buildTextField("Demora (ej: 40-50 min)", _demoraController, Icons.timer)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildTextField("Delivery \$", _deliveryController, Icons.delivery_dining, isNumeric: true)),
+                ],
+              ),
+            ]),
+            
+            const SizedBox(height: 25),
+            
+            _buildSectionTitle("Precios Empanadas Comunes"),
+            _buildCard([
+              Row(
+                children: [
+                  Expanded(child: _buildTextField("Unidad \$", _unidadComunController, Icons.attach_money, isNumeric: true)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildTextField("Docena \$", _docenaComunController, Icons.shopping_basket, isNumeric: true)),
+                ],
+              ),
             ]),
 
             const SizedBox(height: 25),
-
-            // Sección Central de Precios
-            _buildSectionTitle('Central de Precios de Empanadas'),
+            
+            _buildSectionTitle("Precios Empanadas Especiales"),
             _buildCard([
               Row(
                 children: [
-                  Expanded(child: _buildTextField('Unidad Común', _unidadComunController, Icons.attach_money, isNumeric: true)),
-                  const SizedBox(width: 15),
-                  Expanded(child: _buildTextField('Docena Común', _docenaComunController, Icons.shopping_basket, isNumeric: true)),
-                ],
-              ),
-              const SizedBox(height: 15),
-              Row(
-                children: [
-                  Expanded(child: _buildTextField('Unidad Especial', _unidadEspecialController, Icons.star, isNumeric: true)),
-                  const SizedBox(width: 15),
-                  Expanded(child: _buildTextField('Docena Especial', _docenaEspecialController, Icons.star_border_outlined, isNumeric: true)),
+                  Expanded(child: _buildTextField("Unidad \$", _unidadEspecialController, Icons.star_outline, isNumeric: true)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _buildTextField("Docena \$", _docenaEspecialController, Icons.grade, isNumeric: true)),
                 ],
               ),
             ]),
-
-            const SizedBox(height: 25),
-
-            // Sección Logística
-            _buildSectionTitle('Logística de Entrega'),
-            _buildCard([
-              Row(
-                children: [
-                  Expanded(child: _buildTextField('Demora (min)', _demoraController, Icons.timer, isNumeric: true)),
-                  const SizedBox(width: 15),
-                  Expanded(child: _buildTextField('Delivery (\$)', _deliveryController, Icons.delivery_dining, isNumeric: true)),
-                ],
-              ),
-            ]),
-
-            const SizedBox(height: 40),
-
-            // Botón Guardar
+            
+            const SizedBox(height: 30),
+            
             ElevatedButton(
               onPressed: _isSaving ? null : _guardarConfiguracion,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFD32F2F),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 18),
+                backgroundColor: const Color(0xFFFF7F50),
+                minimumSize: const Size(double.infinity, 55),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                elevation: 3,
+                elevation: 4,
+                shadowColor: const Color(0xFFFF7F50).withOpacity(0.4),
               ),
-              child: _isSaving
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : Text(
-                      'GUARDAR CONFIGURACIÓN',
-                      style: GoogleFonts.outfit(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+              child: _isSaving 
+                ? const SizedBox(width: 25, height: 25, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+                : const Text("GUARDAR CAMBIOS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
             ),
+            const SizedBox(height: 40),
           ],
         ),
       ),
     );
   }
 
+  Widget _buildDashboard(double total, int count) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFF7F50), Color(0xFFFF4500)],
+        ),
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.orange.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          )
+        ],
+      ),
+      child: Column(
+        children: [
+          Text("VENTAS DE HOY", style: GoogleFonts.montserrat(color: Colors.white.withOpacity(0.8), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+          const SizedBox(height: 8),
+          Text("\$ ${total.toStringAsFixed(2)}", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w900)),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 15),
+            child: Divider(color: Colors.white24, height: 1),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.check_circle_outline, color: Colors.white70, size: 18),
+              const SizedBox(width: 10),
+              Text("Pedidos entregados: $count", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 15, left: 5),
-      child: Text(
-        title.toUpperCase(),
-        style: GoogleFonts.outfit(
-          color: const Color(0xFFD32F2F),
-          fontWeight: FontWeight.bold,
-          fontSize: 16,
-          letterSpacing: 1.2,
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12, left: 5),
+        child: Text(
+          title.toUpperCase(),
+          style: GoogleFonts.montserrat(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey[700],
+            letterSpacing: 1.2,
+          ),
         ),
       ),
     );
@@ -178,16 +260,16 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
 
   Widget _buildCard(List<Widget> children) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 15,
-          ),
+            offset: const Offset(0, 4),
+          )
         ],
       ),
       child: Column(children: children),
@@ -199,23 +281,19 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: TextField(
         controller: controller,
-        keyboardType: isNumeric ? TextInputType.number : TextInputType.text,
+        keyboardType: isNumeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
+        style: GoogleFonts.montserrat(fontSize: 14, fontWeight: FontWeight.w500),
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon, color: Colors.grey[600]),
-          labelStyle: GoogleFonts.outfit(color: Colors.grey[700]),
+          labelStyle: TextStyle(color: Colors.grey[600], fontSize: 13),
+          prefixIcon: Icon(icon, size: 20, color: const Color(0xFFFF7F50)),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
           filled: true,
           fillColor: Colors.grey[50],
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey[200]!),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFD32F2F), width: 1.5),
-          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
       ),
     );
   }
 }
+
