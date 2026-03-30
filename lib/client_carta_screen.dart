@@ -13,6 +13,46 @@ class ClientCartaScreen extends StatefulWidget {
 class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   Map<String, dynamic>? _preciosConfig;
+  final Map<String, int> _carrito = {};
+
+  void _addToCart(String id) => setState(() => _carrito[id] = (_carrito[id] ?? 0) + 1);
+  void _removeFromCart(String id) {
+    if ((_carrito[id] ?? 0) > 0) {
+      setState(() {
+        _carrito[id] = _carrito[id]! - 1;
+        if (_carrito[id] == 0) _carrito.remove(id);
+      });
+    }
+  }
+
+  double _getRawPrice(Map<String, dynamic> prod) {
+    if (prod['categoria'] == 'Empanada') {
+      final key = (prod['is_especial'] ?? false) ? 'unidad_especial' : 'unidad_comun';
+      final val = _preciosConfig?[key];
+      if (val is num) return val.toDouble();
+      if (val is String) return double.tryParse(val.replaceAll(',', '.')) ?? 0;
+      return 0;
+    }
+    final p = prod['precio'];
+    if (p is num) return p.toDouble();
+    if (p is String) return double.tryParse(p.replaceAll(',', '.')) ?? 0;
+    return 0;
+  }
+
+  double _calculateTotal(List<DocumentSnapshot> allProducts) {
+    double subtotal = 0;
+    _carrito.forEach((id, qty) {
+      final doc = allProducts.firstWhere((d) => d.id == id);
+      subtotal += _getRawPrice(doc.data() as Map<String, dynamic>) * qty;
+    });
+    // Agregamos delivery si hay items
+    if (subtotal > 0) {
+      final delivery = _preciosConfig?['precio_delivery'];
+      if (delivery is num) subtotal += delivery.toDouble();
+      else if (delivery is String) subtotal += double.tryParse(delivery.replaceAll(',', '.')) ?? 0;
+    }
+    return subtotal;
+  }
 
   @override
   void initState() {
@@ -67,51 +107,57 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
 
         return Scaffold(
           backgroundColor: const Color(0xFFF9F9F9),
-          body: Column(
+          body: Stack(
             children: [
-              _buildHeader(isOpen),
-              if (!isOpen) _buildClosedBanner(),
-              Expanded(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                  ),
-                  child: Column(
-                    children: [
-                      TabBar(
-                        controller: _tabController,
-                        isScrollable: true,
-                        indicatorWeight: 4,
-                        indicatorSize: TabBarIndicatorSize.label,
-                        indicatorColor: const Color(0xFFFF7F50),
-                        labelColor: const Color(0xFFFF7F50),
-                        unselectedLabelColor: Colors.grey,
-                        labelStyle: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13),
-                        tabs: const [
-                          Tab(text: "PROMOS"),
-                          Tab(text: "PIZZAS"),
-                          Tab(text: "EMPANADAS"),
-                          Tab(text: "BEBIDAS"),
-                          Tab(text: "POSTRES")
+              Column(
+                children: [
+                  _buildHeader(isOpen),
+                  if (!isOpen) _buildClosedBanner(),
+                  Expanded(
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                      ),
+                      child: Column(
+                        children: [
+                          TabBar(
+                            controller: _tabController,
+                            isScrollable: true,
+                            indicatorWeight: 4,
+                            indicatorSize: TabBarIndicatorSize.label,
+                            indicatorColor: const Color(0xFFFF7F50),
+                            labelColor: const Color(0xFFFF7F50),
+                            unselectedLabelColor: Colors.grey,
+                            labelStyle: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13),
+                            tabs: const [
+                              Tab(text: "PROMOS"),
+                              Tab(text: "PIZZAS"),
+                              Tab(text: "EMPANADAS"),
+                              Tab(text: "BEBIDAS"),
+                              Tab(text: "POSTRES")
+                            ],
+                          ),
+                          Expanded(
+                            child: TabBarView(
+                              controller: _tabController,
+                              children: [
+                                _buildCardList('Oferta', isOpen),
+                                _buildCardList('Pizza', isOpen),
+                                _buildCardList('Empanada', isOpen),
+                                _buildCardList('Bebida', isOpen),
+                                _buildCardList('Postre', isOpen)
+                              ],
+                            ),
+                          ),
                         ],
                       ),
-                      Expanded(
-                        child: TabBarView(
-                          controller: _tabController,
-                          children: [
-                            _buildCardList('Oferta'),
-                            _buildCardList('Pizza'),
-                            _buildCardList('Empanada'),
-                            _buildCardList('Bebida'),
-                            _buildCardList('Postre')
-                          ],
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
+              if (_carrito.isNotEmpty)
+                _buildStickyCartButton(),
             ],
           ),
         );
@@ -158,7 +204,11 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
       width: double.infinity,
       margin: const EdgeInsets.only(left: 25, right: 25, bottom: 20),
       padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(color: Colors.red[700], borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))]),
+      decoration: BoxDecoration(
+        color: Colors.red[700], 
+        borderRadius: BorderRadius.circular(15), 
+        boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))]
+      ),
       child: Row(
         children: [
           const Icon(Icons.info_outline, color: Colors.white),
@@ -185,7 +235,42 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
     );
   }
 
-  Widget _buildCardList(String category) {
+  Widget _buildStickyCartButton() {
+    return Positioned(
+      bottom: 30, left: 30, right: 30,
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('productos').snapshots(),
+        builder: (context, snapshot) {
+          double total = 0;
+          if (snapshot.hasData) total = _calculateTotal(snapshot.data!.docs);
+          
+          return GestureDetector(
+            onTap: () { /* Navegar a la pantalla de checkout */ },
+            child: Container(
+              height: 60,
+              decoration: BoxDecoration(
+                color: const Color(0xFF2D2D2D),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 10))],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 24),
+                  const SizedBox(width: 15),
+                  Text("VER MI BOLSA", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1.2)),
+                  const SizedBox(width: 10),
+                  Text("(${_formatMoney(total)})", style: GoogleFonts.montserrat(color: const Color(0xFFFF7F50), fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          );
+        }
+      ),
+    );
+  }
+
+  Widget _buildCardList(String category, bool storeOpen) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('productos').where('categoria', isEqualTo: category).snapshots(),
       builder: (context, snapshot) {
@@ -194,12 +279,13 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
         if (docs.isEmpty) return Center(child: Text("Sin disponibilidad en $category", style: GoogleFonts.montserrat(color: Colors.grey, fontSize: 12)));
 
         return ListView.builder(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 100),
           itemCount: docs.length,
           itemBuilder: (context, index) {
+            final docId = docs[index].id;
             final prod = docs[index].data() as Map<String, dynamic>;
-            final bool disponible = prod['disponible'] ?? true;
-            final bool isOferta = category == 'Oferta';
+            final bool disponible = (prod['disponible'] ?? true) && storeOpen;
+            final int qty = _carrito[docId] ?? 0;
             
             String price = "";
             if (category == 'Empanada') {
@@ -219,35 +305,44 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
                     Stack(
                       children: [
                         Container(
-                          height: 180, width: double.infinity,
+                          height: 140, width: double.infinity,
                           decoration: BoxDecoration(color: Colors.grey[100], borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
                           clipBehavior: Clip.antiAlias,
                           child: _buildImageWidget(prod['foto_url'], category == 'Bebida' ? Icons.local_drink : Icons.fastfood_rounded),
                         ),
                         if (!disponible)
-                          Positioned.fill(child: Container(decoration: BoxDecoration(color: Colors.black45, borderRadius: const BorderRadius.vertical(top: Radius.circular(20))), child: Center(child: Text("AGOTADO", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 24, letterSpacing: 2))))),
+                          Positioned.fill(child: Container(decoration: BoxDecoration(color: Colors.black45, borderRadius: const BorderRadius.vertical(top: Radius.circular(20))), child: Center(child: Text("AGOTADO", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 24))))),
                       ],
                     ),
                     Padding(
                       padding: const EdgeInsets.all(15),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16)),
-                              Text(price, style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: const Color(0xFFFF7F50), fontSize: 18)),
-                            ],
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16)),
+                                Text(price, style: GoogleFonts.montserrat(fontWeight: FontWeight.w800, color: const Color(0xFFFF7F50), fontSize: 15)),
+                                const SizedBox(height: 8),
+                                if (category == 'Oferta') ...[
+                                  ...List<String>.from(prod['items'] ?? []).map((item) {
+                                    String icon = "🍕";
+                                    if (item.toLowerCase().contains("coca") || item.toLowerCase().contains("bebi") || item.toLowerCase().contains("paso")) icon = "🥤";
+                                    if (item.toLowerCase().contains("empa")) icon = "🥟";
+                                    if (item.toLowerCase().contains("postre")) icon = "🍰";
+                                    return Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text("$icon $item", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[700])),
+                                    );
+                                  }),
+                                ] else
+                                  Text(prod['descripcion'] ?? "", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[500]), maxLines: 2),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 5),
-                          if (isOferta) ...[
-                            ...List<String>.from(prod['items'] ?? []).map((item) => Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text("• $item", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[700])),
-                            )),
-                          ] else
-                            Text(prod['descripcion'] ?? "", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[500]), maxLines: 2, overflow: TextOverflow.ellipsis),
+                          if (disponible)
+                            _buildCounter(docId, qty),
                         ],
                       ),
                     ),
@@ -258,6 +353,19 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
           },
         );
       },
+    );
+  }
+
+  Widget _buildCounter(String id, int qty) {
+    return Container(
+      decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(15)),
+      child: Row(
+        children: [
+          IconButton(onPressed: () => _removeFromCart(id), icon: const Icon(Icons.remove_circle_outline, size: 20, color: Color(0xFFFF7F50))),
+          Text(qty.toString(), style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16)),
+          IconButton(onPressed: () => _addToCart(id), icon: const Icon(Icons.add_circle, size: 20, color: Color(0xFFFF7F50))),
+        ],
+      ),
     );
   }
 
