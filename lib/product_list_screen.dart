@@ -145,6 +145,15 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
                         style: GoogleFonts.montserrat(color: Colors.grey[500], fontSize: 11, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
                     ),
                   _buildInput(activeCategory == 'Oferta' ? "Items unidos con +" : "Descripción corta", _descController, Icons.description),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    title: Text("Producto Disponible", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13, color: _isAvailable ? Colors.green[800] : Colors.red[800])),
+                    subtitle: Text(_isAvailable ? "Los clientes pueden pedirlo" : "Aparecerá como AGOTADO", style: GoogleFonts.montserrat(fontSize: 11)),
+                    value: _isAvailable,
+                    activeColor: Colors.green,
+                    secondary: Icon(_isAvailable ? Icons.check_circle : Icons.do_not_disturb_on, color: _isAvailable ? Colors.green : Colors.red),
+                    onChanged: (val) { setModalState(() => _isAvailable = val); setState(() => _isAvailable = val); },
+                  ),
                   const SizedBox(height: 15),
                   ElevatedButton(
                     onPressed: _isUploading ? null : () => _saveProduct(setModalState, activeCategory),
@@ -254,6 +263,7 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
             final prod = doc.data() as Map<String, dynamic>;
             final bool especial = prod['is_especial'] ?? false;
             final bool isOferta = category == 'Oferta';
+            final bool disponible = prod['disponible'] ?? true;
             
             String priceLabel = "";
             if (category == 'Empanada') {
@@ -264,65 +274,95 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
 
             if (isOferta) {
               return GestureDetector(
-                onTap: () => _showProductModal(id: doc.id, data: prod), // Habilitado para editar OFERTAS
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 15),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white, borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.red[400]!, width: 1.5),
-                    boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.06), blurRadius: 10)]
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 80, height: 80,
-                        decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(15)),
-                        clipBehavior: Clip.antiAlias,
-                        child: _buildImageWidget(prod['foto_url'], Icons.local_offer, size: 30),
-                      ),
-                      const SizedBox(width: 15),
-                      Expanded(
-                        child: Column(
+                onTap: () => _showProductModal(id: doc.id, data: prod),
+                child: Opacity(
+                  opacity: disponible ? 1.0 : 0.6,
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 15),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white, borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: disponible ? Colors.red[400]! : Colors.grey, width: 1.5),
+                      boxShadow: [BoxShadow(color: (disponible ? Colors.red : Colors.grey).withOpacity(0.06), blurRadius: 10)]
+                    ),
+                    child: Stack(
+                      children: [
+                        Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
-                            const SizedBox(height: 6),
-                            ..._buildOfertaLines(prod['descripcion'] ?? ""),
-                            const SizedBox(height: 8),
-                            Align(
-                              alignment: Alignment.bottomRight,
-                              child: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: Colors.red, fontSize: 22)),
+                            Container(
+                              width: 80, height: 80,
+                              decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(15)),
+                              clipBehavior: Clip.antiAlias,
+                              child: _buildImageWidget(prod['foto_url'], Icons.local_offer, size: 30),
+                            ),
+                            const SizedBox(width: 15),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
+                                  const SizedBox(height: 6),
+                                  ..._buildOfertaLines(prod['descripcion'] ?? ""),
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.bottomRight,
+                                    child: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: disponible ? Colors.red : Colors.grey, fontSize: 22)),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
+                        if (!disponible)
+                          Positioned(
+                            top: 0, right: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
+                              child: Text("AGOTADO", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               );
             }
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
-              child: ListTile(
-                onTap: () => _showProductModal(id: doc.id, data: prod),
-                leading: Container(
-                  width: 50, height: 50,
-                  decoration: BoxDecoration(color: const Color(0xFFFF7F50).withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
-                  clipBehavior: Clip.antiAlias,
-                  child: _buildImageWidget(prod['foto_url'], Icons.restaurant),
+            return Opacity(
+              opacity: disponible ? 1.0 : 0.6,
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white, borderRadius: BorderRadius.circular(15), 
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+                  border: !disponible ? Border.all(color: Colors.red.withOpacity(0.3), width: 1) : null,
                 ),
-                title: Row(
-                  children: [
-                    Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 14)),
-                    if (especial) Container(margin: const EdgeInsets.only(left: 4), padding: const EdgeInsets.all(2), decoration: BoxDecoration(color: Colors.amber[100], borderRadius: BorderRadius.circular(4)), child: Text("⭐", style: TextStyle(fontSize: 8))),
-                  ],
+                child: ListTile(
+                  onTap: () => _showProductModal(id: doc.id, data: prod),
+                  leading: Stack(
+                    children: [
+                      Container(
+                        width: 50, height: 50,
+                        decoration: BoxDecoration(color: const Color(0xFFFF7F50).withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
+                        clipBehavior: Clip.antiAlias,
+                        child: _buildImageWidget(prod['foto_url'], Icons.restaurant),
+                      ),
+                      if (!disponible)
+                        Positioned.fill(child: Container(color: Colors.black26, child: const Center(child: Icon(Icons.block, color: Colors.white, size: 20)))),
+                    ],
+                  ),
+                  title: Row(
+                    children: [
+                      Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 14)),
+                      if (especial) Container(margin: const EdgeInsets.only(left: 4), padding: const EdgeInsets.all(2), decoration: BoxDecoration(color: Colors.amber[100], borderRadius: BorderRadius.circular(4)), child: const Text("⭐", style: TextStyle(fontSize: 8))),
+                      if (!disponible) Container(margin: const EdgeInsets.only(left: 8), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(4)), child: Text("AGOTADO", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 8))),
+                    ],
+                  ),
+                  subtitle: Text(prod['descripcion'] ?? "", style: GoogleFonts.montserrat(fontSize: 11), maxLines: 1),
+                  trailing: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: disponible ? const Color(0xFFFF7F50) : Colors.grey, fontSize: 15)),
                 ),
-                subtitle: Text(prod['descripcion'] ?? "", style: GoogleFonts.montserrat(fontSize: 11), maxLines: 1),
-                trailing: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: const Color(0xFFFF7F50), fontSize: 15)),
               ),
             );
           },
