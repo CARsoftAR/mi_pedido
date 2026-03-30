@@ -167,8 +167,16 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("ESTAMOS CERRADOS", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                Text("Volveremos a las ${_preciosConfig?['horario'] ?? 'el próximo turno'}.", style: GoogleFonts.montserrat(color: Colors.white.withOpacity(0.9), fontSize: 11)),
+                Text(
+                  _preciosConfig?['local_abierto_manual'] == false ? "CERRADO TEMPORALMENTE" : "ESTAMOS CERRADOS",
+                  style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)
+                ),
+                Text(
+                  _preciosConfig?['local_abierto_manual'] == false 
+                      ? "Disculpá las molestias, volvemos pronto." 
+                      : "Volveremos a las ${_preciosConfig?['horario'] ?? 'el próximo turno'}.", 
+                  style: GoogleFonts.montserrat(color: Colors.white.withOpacity(0.9), fontSize: 11)
+                ),
               ],
             ),
           ),

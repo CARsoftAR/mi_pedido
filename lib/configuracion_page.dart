@@ -264,7 +264,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(
-                  _isStoreOpenNow() ? "LOCAL ABIERTO ✅" : "LOCAL CERRADO ❌",
+                  !_localAbiertoManual ? "CERRADO MANUALMENTE ❌" : (_isStoreOpenNow() ? "LOCAL ABIERTO ✅" : "FUERA DE HORARIO ❌"),
                   style: GoogleFonts.montserrat(
                     fontWeight: FontWeight.w900,
                     fontSize: 16,
@@ -273,10 +273,10 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
                 ),
                 subtitle: Text(
                   !_localAbiertoManual 
-                    ? "CERRADO TEMPORALMENTE (Manual)" 
+                    ? "MANDO TOTAL: El local ignora el horario y figura CERRADO" 
                     : (_isStoreOpenNow() 
-                        ? "El local está recibiendo pedidos" 
-                        : "Fuera de horario comercial (${_horarioController.text})"),
+                        ? "El local está recibiendo pedidos (En horario)" 
+                        : "Cerrado por horario comercial (${_horarioController.text})"),
                   style: GoogleFonts.montserrat(fontSize: 12),
                 ),
                 value: _localAbiertoManual,
