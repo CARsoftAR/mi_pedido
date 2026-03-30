@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'client_carta_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -29,41 +28,49 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
     try {
+      String userPhone = _phoneController.text.trim();
+      String userName = _nameController.text.trim();
+      String userAddress = _addressController.text.trim();
+
       if (_isRegistering) {
         // Registro
-        final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(_phoneController.text.trim()).get();
+        final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(userPhone).get();
         if (userDoc.exists) {
-          _showError("Este número de celular ya está registrado.");
+          _showError("Este número ya tiene una cuenta. Por favor, iniciá sesión.");
           setState(() => _isLoading = false);
           return;
         }
 
-        await FirebaseFirestore.instance.collection('usuarios').doc(_phoneController.text.trim()).set({
-          'nombre': _nameController.text.trim(),
-          'direccion': _addressController.text.trim(),
+        await FirebaseFirestore.instance.collection('usuarios').doc(userPhone).set({
+          'nombre': userName,
+          'direccion': userAddress,
           'detalles_direccion': _detailsController.text.trim(),
-          'celular': _phoneController.text.trim(),
-          'password': _passController.text.trim(), // En una app real usaríamos Firebase Auth, pero seguimos el flujo pedido
+          'celular': userPhone,
+          'password': _passController.text.trim(),
           'createdAt': FieldValue.serverTimestamp(),
         });
       } else {
         // Login Simple
-        final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(_phoneController.text.trim()).get();
+        final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(userPhone).get();
         if (!userDoc.exists || userDoc.data()?['password'] != _passController.text.trim()) {
           _showError("Celular o contraseña incorrectos.");
           setState(() => _isLoading = false);
           return;
         }
+        // Recuperar datos para persistencia
+        userName = userDoc.data()?['nombre'] ?? '';
+        userAddress = userDoc.data()?['direccion'] ?? '';
       }
 
-      // Persistencia
+      // Persistencia Real
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isLoggedIn', true);
-      await prefs.setString('userPhone', _phoneController.text.trim());
-      await prefs.setString('userName', _nameController.text.trim());
+      await prefs.setString('userPhone', userPhone);
+      await prefs.setString('userName', userName);
+      await prefs.setString('userAddress', userAddress);
 
       if (mounted) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ClientCartaScreen()));
+        Navigator.pushReplacementNamed(context, '/carta');
       }
     } catch (e) {
       _showError("Error: $e");
@@ -109,7 +116,44 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Text("Pizzería Gonzalo", style: GoogleFonts.montserrat(fontSize: 28, fontWeight: FontWeight.w900, color: const Color(0xFF2D2D2D))),
                 ),
                 Text(_isRegistering ? "Creá tu cuenta para pedir" : "¡Qué bueno verte de nuevo!", style: GoogleFonts.montserrat(fontSize: 14, color: Colors.grey[600])),
-                const SizedBox(height: 40),
+                const SizedBox(height: 35),
+                
+                // Selector Dual
+                Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(20)),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _isRegistering = false),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: !_isRegistering ? const Color(0xFFFF7F50) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            child: Center(child: Text("INGRESAR", style: GoogleFonts.montserrat(color: !_isRegistering ? Colors.white : Colors.grey[600], fontWeight: FontWeight.bold, fontSize: 12))),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _isRegistering = true),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: _isRegistering ? const Color(0xFFFF7F50) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            child: Center(child: Text("REGISTRARME", style: GoogleFonts.montserrat(color: _isRegistering ? Colors.white : Colors.grey[600], fontWeight: FontWeight.bold, fontSize: 12))),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 30),
                 
                 if (_isRegistering) ...[
                   _buildInput("Nombre Completo", _nameController, Icons.person_outline),
@@ -134,10 +178,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     ? const CircularProgressIndicator(color: Colors.white) 
                     : Text(_isRegistering ? "REGISTRARME" : "INGRESAR", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
-                const SizedBox(height: 15),
+                const SizedBox(height: 10),
                 TextButton(
-                  onPressed: () => setState(() => _isRegistering = !_isRegistering),
-                  child: Text(_isRegistering ? "¿Ya tenés cuenta? Ingresá acá" : "¿Sos nuevo? Creá tu cuenta", style: GoogleFonts.montserrat(color: const Color(0xFFFF7F50), fontWeight: FontWeight.bold)),
+                  onPressed: () => Navigator.pushNamed(context, '/admin'),
+                  child: Text("Acceso Administrativo", style: GoogleFonts.montserrat(color: Colors.grey, fontSize: 11)),
                 ),
               ],
             ),
