@@ -17,7 +17,9 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
   final _nameController = TextEditingController();
   final _descController = TextEditingController();
   final _priceController = TextEditingController();
+  final _itemInputController = TextEditingController();
   
+  List<String> _ofertaItems = [];
   bool _isSpecial = false;
   bool _isAvailable = true;
   String? _editingId;
@@ -52,7 +54,6 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
     } catch (e) { _showError("Error imagen: $e"); }
   }
 
-  // Lógica funcional para Borrar Producto
   void _deleteProduct(String id) async {
     final bool? confirmed = await showDialog<bool>(
       context: context,
@@ -86,11 +87,23 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
       _isAvailable = data['disponible'] ?? true;
       _currentImageUrl = data['foto_url'];
       _imageFile = null;
+      
+      if (activeCategory == 'Oferta') {
+        if (data['items'] != null) {
+          _ofertaItems = List<String>.from(data['items']);
+        } else if (data['descripcion'] != null) {
+          _ofertaItems = (data['descripcion'] as String).split(RegExp(r'\s*\+\s*')).where((e) => e.trim().isNotEmpty).toList();
+        } else {
+          _ofertaItems = [];
+        }
+      }
     } else {
       _editingId = null;
       _nameController.clear();
       _descController.clear();
       _priceController.clear();
+      _itemInputController.clear();
+      _ofertaItems = [];
       _isSpecial = false;
       _isAvailable = true;
       _currentImageUrl = null;
@@ -144,7 +157,50 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
                       child: Text("Precio automático (Central de Precios).", 
                         style: GoogleFonts.montserrat(color: Colors.grey[500], fontSize: 11, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
                     ),
-                  _buildInput(activeCategory == 'Oferta' ? "Items unidos con +" : "Descripción corta", _descController, Icons.description),
+
+                  if (activeCategory == 'Oferta') ...[
+                    const Divider(),
+                    Text("PRODUCTOS INCLUIDOS EN LA OFERTA", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey[600])),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInput("Ej: 2 Muzza Grande", _itemInputController, Icons.add_shopping_cart)),
+                        const SizedBox(width: 10),
+                        ElevatedButton(
+                          onPressed: () {
+                            if (_itemInputController.text.isNotEmpty) {
+                              setModalState(() => _ofertaItems.add(_itemInputController.text.trim()));
+                              _itemInputController.clear();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green, shape: const CircleBorder(), padding: const EdgeInsets.all(12)),
+                          child: const Icon(Icons.add, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    ..._ofertaItems.asMap().entries.map((entry) {
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(10)),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.check_circle_outline, size: 16, color: Colors.green),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(entry.value, style: GoogleFonts.montserrat(fontSize: 13))),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                              onPressed: () => setModalState(() => _ofertaItems.removeAt(entry.key)),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    const Divider(),
+                  ] else
+                    _buildInput("Descripción corta", _descController, Icons.description),
+
                   const SizedBox(height: 10),
                   SwitchListTile(
                     title: Text("Producto Disponible", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13, color: _isAvailable ? Colors.green[800] : Colors.red[800])),
@@ -162,12 +218,14 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                       : Text(_editingId == null ? "CARGAR A LA CARTA" : "GUARDAR CAMBIOS", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
-                  // Botón de Borrado solo si estamos editando
                   if (_editingId != null) 
-                    TextButton.icon(
-                      onPressed: () => _deleteProduct(_editingId!),
-                      icon: const Icon(Icons.delete_forever, color: Colors.red),
-                      label: Text("BORRAR PRODUCTO 🗑️", style: GoogleFonts.montserrat(color: Colors.red, fontWeight: FontWeight.bold)),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: TextButton.icon(
+                        onPressed: () => _deleteProduct(_editingId!),
+                        icon: const Icon(Icons.delete_forever, color: Colors.red),
+                        label: Text("BORRAR PRODUCTO 🗑️", style: GoogleFonts.montserrat(color: Colors.red, fontWeight: FontWeight.bold)),
+                      ),
                     ),
                 ],
               ),
@@ -204,6 +262,7 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
         'categoria': activeCategory,
         'is_especial': (activeCategory == 'Pizza' || activeCategory == 'Empanada') ? _isSpecial : false, 
         'disponible': _isAvailable,
+        'items': activeCategory == 'Oferta' ? _ofertaItems : [],
         'foto_url': imageData,
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -273,6 +332,10 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
             }
 
             if (isOferta) {
+              final List<String> items = (prod['items'] != null) 
+                  ? List<String>.from(prod['items']) 
+                  : (prod['descripcion'] ?? "").toString().split(RegExp(r'\s*\+\s*')).where((e) => e.trim().isNotEmpty).toList();
+
               return GestureDetector(
                 onTap: () => _showProductModal(id: doc.id, data: prod),
                 child: Opacity(
@@ -291,7 +354,7 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
-                              width: 80, height: 80,
+                              width: 85, height: 85,
                               decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(15)),
                               clipBehavior: Clip.antiAlias,
                               child: _buildImageWidget(prod['foto_url'], Icons.local_offer, size: 30),
@@ -301,13 +364,31 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
-                                  const SizedBox(height: 6),
-                                  ..._buildOfertaLines(prod['descripcion'] ?? ""),
+                                  Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
                                   const SizedBox(height: 8),
+                                  ...items.map((item) {
+                                    String emoji = "✨";
+                                    String lower = item.toLowerCase();
+                                    if (lower.contains("pizza")) emoji = "🍕";
+                                    else if (lower.contains("empanada")) emoji = "🥟";
+                                    else if (lower.contains("coca") || lower.contains("bebida") || lower.contains("cerveza") || lower.contains("sprite")) emoji = "🥤";
+                                    else if (lower.contains("helado") || lower.contains("postre")) emoji = "🍰";
+
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 4),
+                                      child: Row(
+                                        children: [
+                                          Text(emoji, style: const TextStyle(fontSize: 11)),
+                                          const SizedBox(width: 8),
+                                          Expanded(child: Text(item.trim(), style: GoogleFonts.montserrat(fontSize: 13, color: Colors.grey[800], fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                  const SizedBox(height: 10),
                                   Align(
                                     alignment: Alignment.bottomRight,
-                                    child: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: disponible ? Colors.red : Colors.grey, fontSize: 22)),
+                                    child: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: disponible ? Colors.red : Colors.grey, fontSize: 24)),
                                   ),
                                 ],
                               ),
@@ -369,29 +450,6 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
         );
       },
     );
-  }
-
-  List<Widget> _buildOfertaLines(String desc) {
-    final List<String> lines = desc.split(RegExp(r'\s*\+\s*'));
-    return lines.map((line) {
-      String emoji = "✨";
-      String lower = line.toLowerCase();
-      if (lower.contains("pizza")) emoji = "🍕";
-      else if (lower.contains("empanada")) emoji = "🥟";
-      else if (lower.contains("coca") || lower.contains("bebida") || lower.contains("cerveza") || lower.contains("sprite")) emoji = "🥤";
-      else if (lower.contains("helado") || lower.contains("postre")) emoji = "🍰";
-
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Row(
-          children: [
-            Text(emoji, style: const TextStyle(fontSize: 10)),
-            const SizedBox(width: 6),
-            Expanded(child: Text(line.trim(), style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[700]), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ],
-        ),
-      );
-    }).toList();
   }
 
   Widget _buildImageWidget(String? imageData, IconData fallbackIcon, {double size = 25}) {
