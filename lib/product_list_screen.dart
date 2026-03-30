@@ -220,28 +220,7 @@ class _ProductListScreenState extends State<ProductListScreen>
                     _nameController,
                     Icons.fastfood,
                   ),
-                  if (activeCategory == 'Pizza' || activeCategory == 'Empanada')
-                    SwitchListTile(
-                      title: Text(
-                        "¿Variedad Especial?",
-                        style: GoogleFonts.montserrat(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
-                      value: _isSpecial,
-                      activeColor: Colors.amber[700],
-                      secondary: Icon(
-                        Icons.star,
-                        color: _isSpecial
-                            ? Colors.amber[700]
-                            : Colors.grey[200],
-                      ),
-                      onChanged: (val) {
-                        setModalState(() => _isSpecial = val);
-                        setState(() => _isSpecial = val);
-                      },
-                    ),
+                  const SizedBox(height: 15),
                   if (activeCategory != 'Empanada')
                     _buildInput(
                       "Precio Actual (\$)",
@@ -471,10 +450,7 @@ class _ProductListScreenState extends State<ProductListScreen>
             ? 0
             : (double.tryParse(_priceController.text) ?? 0),
         'categoria': activeCategory,
-        'is_especial':
-            (activeCategory == 'Pizza' || activeCategory == 'Empanada')
-            ? _isSpecial
-            : false,
+        'is_especial': activeCategory == 'Empanada' ? _isSpecial : false,
         'disponible': _isAvailable,
         'items': activeCategory == 'Oferta' ? _ofertaItems : [],
         'foto_url': imageData,
@@ -806,7 +782,7 @@ class _ProductListScreenState extends State<ProductListScreen>
                           fontSize: 14,
                         ),
                       ),
-                      if (especial)
+                      if (especial && category == 'Empanada')
                         Container(
                           margin: const EdgeInsets.only(left: 4),
                           padding: const EdgeInsets.all(2),
