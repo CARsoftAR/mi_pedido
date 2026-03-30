@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 
 class ConfiguracionPage extends StatefulWidget {
   const ConfiguracionPage({super.key});
@@ -23,6 +24,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
 
   bool _isSaving = false;
   bool _isLoading = true;
+  bool _isClosing = false;
 
   @override
   void initState() {
@@ -93,6 +95,62 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
     }
   }
 
+  Future<void> _realizarCierreCaja() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Confirmar Cierre"),
+        content: const Text("¿Estás seguro de realizar el cierre de caja? Esto reiniciará el contador de ventas actuales."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCELAR")),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("CONFIRMAR CIERRE")),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isClosing = true);
+    try {
+      final query = await FirebaseFirestore.instance
+          .collection('pedidos')
+          .where('estado', isEqualTo: 'Finalizado')
+          .get();
+
+      final untrackedDocs = query.docs.where((doc) => (doc.data()['contabilizado'] ?? false) == false).toList();
+
+      if (untrackedDocs.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay pedidos nuevos para cerrar')));
+        return;
+      }
+
+      double totalMonto = 0;
+      for (var doc in untrackedDocs) {
+        totalMonto += (doc.data()['total'] ?? 0).toDouble();
+      }
+
+      await FirebaseFirestore.instance.collection('cierres_caja').add({
+        'fecha_cierre': FieldValue.serverTimestamp(),
+        'monto_total': totalMonto,
+        'total_pedidos': untrackedDocs.length,
+      });
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (var doc in untrackedDocs) {
+        batch.update(doc.reference, {'contabilizado': true});
+      }
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cierre de caja realizado con éxito'), backgroundColor: Colors.green));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en el cierre: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isClosing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -107,33 +165,58 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistorialCierresPage())),
+            tooltip: "Historial de Cierres",
+          )
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // DASHBOARD PREMIUM (Cierre de Caja)
+            // DASHBOARD CIERRE DE CAJA
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection('pedidos').where('estado', isEqualTo: 'Finalizado').snapshots(),
               builder: (context, snapshot) {
-                double totalHoy = 0;
-                int countHoy = 0;
+                double totalActual = 0;
+                int countActual = 0;
                 if (snapshot.hasData) {
-                  final now = DateTime.now();
-                  final today = DateTime(now.year, now.month, now.day);
                   for (var doc in snapshot.data!.docs) {
                     final data = doc.data() as Map<String, dynamic>;
-                    final Timestamp? ts = data['updatedAt'];
-                    if (ts != null) {
-                      final date = ts.toDate();
-                      if (date.isAfter(today)) {
-                        totalHoy += (data['total'] ?? 0).toDouble();
-                        countHoy++;
-                      }
+                    if ((data['contabilizado'] ?? false) == false) {
+                      totalActual += (data['total'] ?? 0).toDouble();
+                      countActual++;
                     }
                   }
                 }
-                return _buildDashboard(totalHoy, countHoy);
+                return Column(
+                  children: [
+                    _buildDashboard(totalActual, countActual),
+                    const SizedBox(height: 15),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _isClosing ? null : _realizarCierreCaja,
+                            icon: _isClosing 
+                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                : const Icon(Icons.lock_outline, size: 20),
+                            label: const Text("REALIZAR CIERRE DE CAJA", style: TextStyle(fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blueGrey[800],
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(double.infinity, 50),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
               },
             ),
             const SizedBox(height: 25),
@@ -220,7 +303,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
       ),
       child: Column(
         children: [
-          Text("VENTAS DE HOY", style: GoogleFonts.montserrat(color: Colors.white.withOpacity(0.8), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+          Text("VENTAS ACTUALES (POR CERRAR)", style: GoogleFonts.montserrat(color: Colors.white.withOpacity(0.8), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
           const SizedBox(height: 8),
           Text("\$ ${total.toStringAsFixed(2)}", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w900)),
           const Padding(
@@ -232,7 +315,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
             children: [
               const Icon(Icons.check_circle_outline, color: Colors.white70, size: 18),
               const SizedBox(width: 10),
-              Text("Pedidos entregados: $count", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+              Text("Pedidos sin contabilizar: $count", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
             ],
           ),
         ],
@@ -292,6 +375,73 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
           fillColor: Colors.grey[50],
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
+      ),
+    );
+  }
+}
+
+class HistorialCierresPage extends StatelessWidget {
+  const HistorialCierresPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF9F9F9),
+      appBar: AppBar(
+        title: Text("Historial de Cierres", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18)),
+        centerTitle: true,
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+      ),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('cierres_caja').orderBy('fecha_cierre', descending: true).snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return Center(child: Text("No hay cierres registrados", style: GoogleFonts.montserrat(color: Colors.grey)));
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.all(20),
+            itemCount: snapshot.data!.docs.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, index) {
+              final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+              final date = (data['fecha_cierre'] as Timestamp).toDate();
+              final format = DateFormat('dd/MM/yyyy HH:mm');
+
+              return Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(15),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle),
+                      child: const Icon(Icons.receipt_long, color: Color(0xFFFF7F50)),
+                    ),
+                    const SizedBox(width: 15),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(format.format(date), style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 14)),
+                          Text("${data['total_pedidos']} pedidos registrados", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[600])),
+                        ],
+                      ),
+                    ),
+                    Text("\$ ${data['monto_total'].toStringAsFixed(2)}", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green[700])),
+                  ],
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
