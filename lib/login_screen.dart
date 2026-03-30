@@ -21,9 +21,16 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isRegistering = true;
 
   Future<void> _handleAuth() async {
-    if (_nameController.text.isEmpty || _addressController.text.isEmpty || _phoneController.text.isEmpty || _passController.text.isEmpty) {
-      _showError("Por favor completa todos los campos obligatorios.");
-      return;
+    if (_isRegistering) {
+      if (_nameController.text.isEmpty || _addressController.text.isEmpty || _phoneController.text.isEmpty || _passController.text.isEmpty) {
+        _showError("Por favor completa todos los campos de registro.");
+        return;
+      }
+    } else {
+      if (_phoneController.text.isEmpty || _passController.text.isEmpty) {
+        _showError("Ingresá tu celular y contraseña.");
+        return;
+      }
     }
 
     setState(() => _isLoading = true);
@@ -202,7 +209,7 @@ class _LoginScreenState extends State<LoginScreen> {
       child: TextField(
         controller: controller,
         obscureText: isPass,
-        keyboardType: isPhone ? TextInputType.phone : TextInputType.text,
+        keyboardType: isPhone ? TextInputType.number : TextInputType.text,
         style: GoogleFonts.montserrat(fontSize: 14),
         decoration: InputDecoration(
           labelText: label,

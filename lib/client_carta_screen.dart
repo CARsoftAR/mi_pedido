@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'cart_summary_screen.dart';
 
 class ClientCartaScreen extends StatefulWidget {
   const ClientCartaScreen({super.key});
@@ -45,11 +47,9 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
       final doc = allProducts.firstWhere((d) => d.id == id);
       subtotal += _getRawPrice(doc.data() as Map<String, dynamic>) * qty;
     });
-    // Agregamos delivery si hay items
+    // Costo de envío fijo de $3000
     if (subtotal > 0) {
-      final delivery = _preciosConfig?['precio_delivery'];
-      if (delivery is num) subtotal += delivery.toDouble();
-      else if (delivery is String) subtotal += double.tryParse(delivery.replaceAll(',', '.')) ?? 0;
+      subtotal += 3000;
     }
     return subtotal;
   }
@@ -58,33 +58,117 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
+    _initOrderStatusListener();
   }
 
-  bool _isStoreOpenNow() {
+  void _initOrderStatusListener() {
+    FirebaseFirestore.instance
+        .collection('pedidos')
+        .snapshots() // Escuchar todos pero filtrar por cliente o guardar ID en prefs
+        .listen((snapshot) async {
+          final prefs = await SharedPreferences.getInstance();
+          final String? lastOrderId = prefs.getString('lastOrderId');
+          final String? lastStatus = prefs.getString('notifiedStatus') ?? 'Pendiente';
+
+          if (lastOrderId == null) return;
+
+          for (var change in snapshot.docChanges) {
+            if (change.doc.id == lastOrderId) {
+              final data = change.doc.data() as Map<String, dynamic>;
+              final String newStatus = data['estado'] ?? 'Pendiente';
+              
+              if (newStatus == lastStatus) continue;
+
+              await prefs.setString('notifiedStatus', newStatus);
+
+              if (newStatus == 'Cancelado' && mounted) {
+                _showRejectionAlert(data['motivo_rechazo'] ?? 'No especificado');
+              } else if (newStatus == 'En Preparación' && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("¡Tu pedido fue aceptado! En breve estará listo ✅"),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 5),
+                  ),
+                );
+              }
+            }
+          }
+        });
+  }
+
+  void _showRejectionAlert(String motivo) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              color: Colors.red[50],
+              child: Column(
+                children: [
+                   const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 40),
+                   const SizedBox(height: 10),
+                   Text("AVISO IMPORTANTE", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: Colors.red[800], fontSize: 16)),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(25),
+              child: Column(
+                children: [
+                  Text("Tu pedido fue rechazado", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87)),
+                  const SizedBox(height: 15),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(15)),
+                    child: Text(
+                      "Motivo: $motivo",
+                      style: GoogleFonts.montserrat(fontSize: 14, color: Colors.grey[700], fontStyle: FontStyle.italic),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 25),
+                  OutlinedButton(
+                    onPressed: () {
+                      setState(() => _carrito.clear());
+                      Navigator.pop(context);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.red),
+                      minimumSize: const Size(double.infinity, 50),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    ),
+                    child: Text("ENTENDIDO", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _checkStatus() {
     if (_preciosConfig == null) return true;
-    final bool manualOpen = _preciosConfig!['local_abierto_manual'] ?? true;
-    if (!manualOpen) return false;
-
-    try {
-      final String horarioRaw = (_preciosConfig!['horario'] ?? "").toString().trim().toLowerCase();
-      final parts = horarioRaw.split(RegExp(r'[\sa\-]+')).where((e) => e.isNotEmpty).toList();
-      if (parts.length < 2) return true;
-
-      final startParts = parts[0].trim().split(':');
-      final endParts = parts[parts.length - 1].trim().split(':');
-      
-      final double startVal = double.parse(startParts[0]) + (double.parse(startParts[1]) / 60.0);
-      final double endVal = double.parse(endParts[0]) + (double.parse(endParts[1]) / 60.0);
-      
-      final now = DateTime.now();
-      final double nowVal = now.hour + (now.minute / 60.0);
-
-      if (endVal < startVal) {
-        return (nowVal >= startVal || nowVal < endVal);
-      } else {
-        return (nowVal >= startVal && nowVal < endVal);
-      }
-    } catch (e) { return true; }
+    final int estadoControl = _preciosConfig!['estado_control'] ?? (_preciosConfig!['local_abierto_manual'] == false ? 0 : 1);
+    
+    // Si el Admin dijo CERRADO (0), es cerrado definitivo.
+    if (estadoControl == 0) return false;
+    // Si el Admin dijo ABIERTO (2), es abierto definitivo.
+    if (estadoControl == 2) return true;
+    
+    // Modo AUTO (1): Respeta horario 20:00 - 04:00
+    final int hora = DateTime.now().hour;
+    return (hora >= 20) || (hora < 4);
   }
 
   String _formatMoney(dynamic value) {
@@ -103,7 +187,7 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
         if (!configSnapshot.hasData) return const Center(child: CircularProgressIndicator());
         
         _preciosConfig = configSnapshot.data!.data() as Map<String, dynamic>?;
-        final bool isOpen = _isStoreOpenNow();
+        final bool isOpen = _checkStatus();
 
         return Scaffold(
           backgroundColor: const Color(0xFFF9F9F9),
@@ -218,13 +302,13 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _preciosConfig?['local_abierto_manual'] == false ? "CERRADO TEMPORALMENTE" : "ESTAMOS CERRADOS",
+                  _preciosConfig?['estado_control'] == 0 ? "CERRADO TEMPORALMENTE" : "ESTAMOS CERRADOS",
                   style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)
                 ),
                 Text(
-                  _preciosConfig?['local_abierto_manual'] == false 
+                  _preciosConfig?['estado_control'] == 0 
                       ? "Disculpá las molestias, volvemos pronto." 
-                      : "Volveremos a las ${_preciosConfig?['horario'] ?? 'el próximo turno'}.", 
+                      : "Volveremos a abrir a las 20:00 hs.", 
                   style: GoogleFonts.montserrat(color: Colors.white.withOpacity(0.9), fontSize: 11)
                 ),
               ],
@@ -245,7 +329,19 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
           if (snapshot.hasData) total = _calculateTotal(snapshot.data!.docs);
           
           return GestureDetector(
-            onTap: () { /* Navegar a la pantalla de checkout */ },
+            onTap: () {
+              final allDocs = snapshot.data!.docs;
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CartSummaryScreen(
+                    carrito: _carrito,
+                    preciosConfig: _preciosConfig!,
+                    allProducts: allDocs,
+                  ),
+                ),
+              );
+            },
             child: Container(
               height: 60,
               decoration: BoxDecoration(
@@ -310,21 +406,19 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
                           clipBehavior: Clip.antiAlias,
                           child: _buildImageWidget(prod['foto_url'], category == 'Bebida' ? Icons.local_drink : Icons.fastfood_rounded),
                         ),
-                        if (!disponible)
-                          Positioned.fill(child: Container(decoration: BoxDecoration(color: Colors.black45, borderRadius: const BorderRadius.vertical(top: Radius.circular(20))), child: Center(child: Text("AGOTADO", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 24))))),
                       ],
                     ),
                     Padding(
                       padding: const EdgeInsets.all(15),
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16)),
-                                Text(price, style: GoogleFonts.montserrat(fontWeight: FontWeight.w800, color: const Color(0xFFFF7F50), fontSize: 15)),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: 4),
                                 if (category == 'Oferta') ...[
                                   ...List<String>.from(prod['items'] ?? []).map((item) {
                                     String icon = "🍕";
@@ -337,12 +431,17 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
                                     );
                                   }),
                                 ] else
-                                  Text(prod['descripcion'] ?? "", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[500]), maxLines: 2),
+                                  Text(prod['descripcion'] ?? "", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[500]), maxLines: 3),
+                                const SizedBox(height: 8),
+                                Text(price, style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: const Color(0xFFFF7F50), fontSize: 16)),
                               ],
                             ),
                           ),
                           if (disponible)
-                            _buildCounter(docId, qty),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 10),
+                              child: _buildCounter(docId, qty),
+                            ),
                         ],
                       ),
                     ),

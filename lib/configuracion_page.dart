@@ -21,8 +21,11 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
   final TextEditingController _docenaComunController = TextEditingController();
   final TextEditingController _unidadEspecialController = TextEditingController();
   final TextEditingController _docenaEspecialController = TextEditingController();
+  
+  final TextEditingController _aliasController = TextEditingController();
+  final TextEditingController _cbuController = TextEditingController();
 
-  bool _localAbiertoManual = true;
+  int _estadoControl = 1; // 0=Cerrado, 1=Auto, 2=Abierto
   bool _isSaving = false;
   bool _isLoading = true;
   bool _isClosing = false;
@@ -64,7 +67,16 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
           _unidadEspecialController.text = _formatPrice(data['unidad_especial']);
           _docenaEspecialController.text = _formatPrice(data['docena_especial']);
           
-          _localAbiertoManual = data['local_abierto_manual'] ?? true;
+          _aliasController.text = data['alias_mp'] ?? '';
+          _cbuController.text = data['cbu_cvu'] ?? '';
+          
+          if (data.containsKey('estado_control')) {
+            _estadoControl = data['estado_control'] ?? 1;
+          } else {
+            // Migración: si existe el campo viejo, lo mapeamos
+            bool viejo = data['local_abierto_manual'] ?? true;
+            _estadoControl = viejo ? 1 : 0;
+          }
         });
       }
     } catch (e) {
@@ -74,39 +86,13 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
     }
   }
 
-  bool _isStoreOpenNow() {
-    if (!_localAbiertoManual) return false;
-
-    try {
-      final String horarioRaw = _horarioController.text.trim().toLowerCase();
-      // Soporta formatos "20:00 a 02:00", "20:00 - 02:00", "20:00 02:00"
-      final parts = horarioRaw.split(RegExp(r'[\sa\-]+')).where((e) => e.isNotEmpty).toList();
-      if (parts.length < 2) return true; // Si el formato no es claro, dependemos del switch
-
-      final String startStr = parts[0].trim();
-      final String endStr = parts[parts.length - 1].trim();
-
-      // Parseamos horas y minutos manualmente para evitar dependencias de fecha
-      final startParts = startStr.split(':');
-      final endParts = endStr.split(':');
-      
-      final double startVal = double.parse(startParts[0]) + (double.parse(startParts[1]) / 60.0);
-      final double endVal = double.parse(endParts[0]) + (double.parse(endParts[1]) / 60.0);
-      
-      final now = DateTime.now();
-      final double nowVal = now.hour + (now.minute / 60.0);
-
-      if (endVal < startVal) {
-        // Horario cruzado (ej: 20:00 a 02:00)
-        return (nowVal >= startVal || nowVal < endVal);
-      } else {
-        // Horario normal (ej: 10:00 a 20:00)
-        return (nowVal >= startVal && nowVal < endVal);
-      }
-    } catch (e) {
-      debugPrint("Error parseando horario: $e");
-      return true; // Ante error, permitimos si el switch está ON
-    }
+  bool _checkStatus() {
+    if (_estadoControl == 0) return false;
+    if (_estadoControl == 2) return true;
+    
+    // Modo AUTO (1)
+    final int hora = DateTime.now().hour;
+    return (hora >= 20) || (hora < 4);
   }
 
   void _guardarConfiguracion() async {
@@ -122,7 +108,9 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         'docena_comun': _parsePrice(_docenaComunController.text),
         'unidad_especial': _parsePrice(_unidadEspecialController.text),
         'docena_especial': _parsePrice(_docenaEspecialController.text),
-        'local_abierto_manual': _localAbiertoManual,
+        'alias_mp': _aliasController.text.trim(),
+        'cbu_cvu': _cbuController.text.trim(),
+        'estado_control': _estadoControl,
         'updated_at': FieldValue.serverTimestamp(),
       };
       await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set(data, SetOptions(merge: true));
@@ -259,29 +247,67 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
               },
             ),
             const SizedBox(height: 15),
-            _buildSectionTitle("Estado del Local"),
+            _buildSectionTitle("Control del Local"),
             _buildCard([
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  !_localAbiertoManual ? "CERRADO MANUALMENTE ❌" : (_isStoreOpenNow() ? "LOCAL ABIERTO ✅" : "FUERA DE HORARIO ❌"),
-                  style: GoogleFonts.montserrat(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
-                    color: _isStoreOpenNow() ? Colors.green[700] : Colors.red[700],
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _estadoControl == 0 
+                            ? "CERRADO ❌" 
+                            : (_estadoControl == 2 ? "SIEMPRE ABIERTO ✅" : (_checkStatus() ? "AUTO: ABIERTO ✅" : "AUTO: CERRADO ❌")),
+                        style: GoogleFonts.montserrat(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                          color: _estadoControl == 0 
+                              ? Colors.red[700] 
+                              : (_estadoControl == 2 
+                                  ? Colors.green[700] 
+                                  : (_checkStatus() ? Colors.green[700] : Colors.grey[700])),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _estadoControl == 1 ? Colors.blue[50] : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _estadoControl == 1 ? "MODO RELOJ" : "MODO MANUAL",
+                          style: GoogleFonts.montserrat(fontSize: 10, fontWeight: FontWeight.bold, color: _estadoControl == 1 ? Colors.blue[800] : Colors.grey[700]),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                subtitle: Text(
-                  !_localAbiertoManual 
-                    ? "MANDO TOTAL: El local ignora el horario y figura CERRADO" 
-                    : (_isStoreOpenNow() 
-                        ? "El local está recibiendo pedidos (En horario)" 
-                        : "Cerrado por horario comercial (${_horarioController.text})"),
-                  style: GoogleFonts.montserrat(fontSize: 12),
-                ),
-                value: _localAbiertoManual,
-                activeColor: Colors.green,
-                onChanged: (val) => setState(() => _localAbiertoManual = val),
+                  const SizedBox(height: 15),
+                  Container(
+                    width: double.infinity,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Row(
+                      children: [
+                        _buildStateButton(0, "CERRADO", Colors.red),
+                        _buildStateButton(1, "AUTO", Colors.blue),
+                        _buildStateButton(2, "ABIERTO", Colors.green),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _estadoControl == 0 
+                      ? "El local ignora el reloj y figura siempre CERRADO." 
+                      : (_estadoControl == 2 
+                        ? "El local ignora el reloj y figura siempre ABIERTO."
+                        : "El local se abre a las 20:00 y se cierra a las 04:00."),
+                    style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ],
               ),
             ]),
             const SizedBox(height: 20),
@@ -323,6 +349,22 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
                   const SizedBox(width: 10),
                   Expanded(child: _buildTextField("Docena \$", _docenaEspecialController, Icons.grade, isNumeric: true)),
                 ],
+              ),
+            ]),
+
+            const SizedBox(height: 25),
+            
+            _buildSectionTitle("Cobros (Mercado Pago / Transferencia)"),
+            _buildCard([
+              _buildTextField("Alias Mercado Pago", _aliasController, Icons.account_balance_wallet_outlined),
+              _buildTextField("CBU / CVU", _cbuController, Icons.credit_card_outlined),
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text(
+                  "Estos datos se mostrarán al cliente al finalizar su pedido para que pueda realizar el pago.",
+                  style: GoogleFonts.montserrat(fontSize: 11, color: Colors.grey[500], fontStyle: FontStyle.italic),
+                  textAlign: TextAlign.center,
+                ),
               ),
             ]),
             
@@ -421,6 +463,40 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         ],
       ),
       child: Column(children: children),
+    );
+  }
+
+  Widget _buildStateButton(int value, String label, Color activeColor) {
+    bool isSelected = _estadoControl == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () async {
+          setState(() => _estadoControl = value);
+          try {
+            await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').update({
+              'estado_control': value,
+              'updated_at': FieldValue.serverTimestamp(),
+            });
+          } catch (e) {
+            debugPrint("Error updating status: $e");
+          }
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: isSelected ? activeColor : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: GoogleFonts.montserrat(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: isSelected ? Colors.white : Colors.grey[600],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

@@ -21,7 +21,6 @@ class _ProductListScreenState extends State<ProductListScreen>
   final _itemInputController = TextEditingController();
 
   List<String> _ofertaItems = [];
-  bool _isSpecial = false;
   bool _isAvailable = true;
   String? _editingId;
   String? _currentImageUrl;
@@ -48,6 +47,10 @@ class _ProductListScreenState extends State<ProductListScreen>
     } catch (e) {
       debugPrint("Error: $e");
     }
+  }
+
+  double _parsePrice(String text) {
+    return double.tryParse(text.trim().replaceAll(',', '.')) ?? 0;
   }
 
   Future<void> _pickImage(StateSetter setModalState) async {
@@ -113,7 +116,6 @@ class _ProductListScreenState extends State<ProductListScreen>
       _nameController.text = data['nombre'] ?? '';
       _descController.text = data['descripcion'] ?? '';
       _priceController.text = (data['precio'] ?? '').toString();
-      _isSpecial = data['is_especial'] ?? false;
       _isAvailable = data['disponible'] ?? true;
       _currentImageUrl = data['foto_url'];
       _imageFile = null;
@@ -137,7 +139,6 @@ class _ProductListScreenState extends State<ProductListScreen>
       _priceController.clear();
       _itemInputController.clear();
       _ofertaItems = [];
-      _isSpecial = false;
       _isAvailable = true;
       _currentImageUrl = null;
       _imageFile = null;
@@ -447,10 +448,9 @@ class _ProductListScreenState extends State<ProductListScreen>
         'nombre': _nameController.text.trim(),
         'descripcion': _descController.text.trim(),
         'precio': activeCategory == 'Empanada'
-            ? 0
+            ? (_parsePrice(_priceController.text))
             : (double.tryParse(_priceController.text) ?? 0),
         'categoria': activeCategory,
-        'is_especial': activeCategory == 'Empanada' ? _isSpecial : false,
         'disponible': _isAvailable,
         'items': activeCategory == 'Oferta' ? _ofertaItems : [],
         'foto_url': imageData,
@@ -555,18 +555,10 @@ class _ProductListScreenState extends State<ProductListScreen>
           itemBuilder: (context, index) {
             final doc = docs[index];
             final prod = doc.data() as Map<String, dynamic>;
-            final bool especial = prod['is_especial'] ?? false;
             final bool isOferta = category == 'Oferta';
             final bool disponible = prod['disponible'] ?? true;
 
-            String priceLabel = "";
-            if (category == 'Empanada') {
-              priceLabel = especial
-                  ? _formatMoney(_preciosConfig?['unidad_especial'])
-                  : _formatMoney(_preciosConfig?['unidad_comun']);
-            } else {
-              priceLabel = _formatMoney(prod['precio']);
-            }
+            String priceLabel = _formatMoney(prod['precio']);
 
             if (isOferta) {
               final List<String> items = (prod['items'] != null)
@@ -773,59 +765,64 @@ class _ProductListScreenState extends State<ProductListScreen>
                         ),
                     ],
                   ),
-                  title: Row(
+                  title: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         prod['nombre'],
                         style: GoogleFonts.montserrat(
                           fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                          fontSize: 15,
                         ),
                       ),
-                      if (especial && category == 'Empanada')
-                        Container(
-                          margin: const EdgeInsets.only(left: 4),
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: Colors.amber[100],
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text("⭐", style: TextStyle(fontSize: 8)),
-                        ),
                       if (!disponible)
                         Container(
-                          margin: const EdgeInsets.only(left: 8),
+                          margin: const EdgeInsets.only(top: 4),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
+                            horizontal: 8,
+                            vertical: 3,
                           ),
                           decoration: BoxDecoration(
                             color: Colors.red,
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(5),
                           ),
                           child: Text(
                             "AGOTADO",
                             style: GoogleFonts.montserrat(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
-                              fontSize: 8,
+                              fontSize: 9,
                             ),
                           ),
                         ),
                     ],
                   ),
-                  subtitle: Text(
-                    prod['descripcion'] ?? "",
-                    style: GoogleFonts.montserrat(fontSize: 11),
-                    maxLines: 1,
-                  ),
-                  trailing: Text(
-                    priceLabel,
-                    style: GoogleFonts.montserrat(
-                      fontWeight: FontWeight.bold,
-                      color: disponible ? const Color(0xFFFF7F50) : Colors.grey,
-                      fontSize: 15,
-                    ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if ((prod['descripcion'] ?? "").toString().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            prod['descripcion'],
+                            style: GoogleFonts.montserrat(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      const SizedBox(height: 6),
+                      Text(
+                        priceLabel,
+                        style: GoogleFonts.montserrat(
+                          fontWeight: FontWeight.w900,
+                          color: disponible ? const Color(0xFFFF7F50) : Colors.grey,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
