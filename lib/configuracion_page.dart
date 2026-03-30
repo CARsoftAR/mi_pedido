@@ -22,6 +22,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
   final TextEditingController _unidadEspecialController = TextEditingController();
   final TextEditingController _docenaEspecialController = TextEditingController();
 
+  bool _localAbiertoManual = true;
   bool _isSaving = false;
   bool _isLoading = true;
   bool _isClosing = false;
@@ -62,6 +63,8 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
           _docenaComunController.text = _formatPrice(data['docena_comun']);
           _unidadEspecialController.text = _formatPrice(data['unidad_especial']);
           _docenaEspecialController.text = _formatPrice(data['docena_especial']);
+          
+          _localAbiertoManual = data['local_abierto_manual'] ?? true;
         });
       }
     } catch (e) {
@@ -84,6 +87,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         'docena_comun': _parsePrice(_docenaComunController.text),
         'unidad_especial': _parsePrice(_unidadEspecialController.text),
         'docena_especial': _parsePrice(_docenaEspecialController.text),
+        'local_abierto_manual': _localAbiertoManual,
         'updated_at': FieldValue.serverTimestamp(),
       };
       await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set(data, SetOptions(merge: true));
@@ -219,7 +223,31 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
                 );
               },
             ),
-            const SizedBox(height: 25),
+            const SizedBox(height: 15),
+            _buildSectionTitle("Estado del Local"),
+            _buildCard([
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  _localAbiertoManual ? "LOCAL ABIERTO ✅" : "LOCAL CERRADO ❌",
+                  style: GoogleFonts.montserrat(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                    color: _localAbiertoManual ? Colors.green[700] : Colors.red[700],
+                  ),
+                ),
+                subtitle: Text(
+                  _localAbiertoManual 
+                    ? "El local sigue el horario programado" 
+                    : "CERRADO TEMPORALMENTE (ignora horario)",
+                  style: GoogleFonts.montserrat(fontSize: 12),
+                ),
+                value: _localAbiertoManual,
+                activeColor: Colors.green,
+                onChanged: (val) => setState(() => _localAbiertoManual = val),
+              ),
+            ]),
+            const SizedBox(height: 20),
             
             _buildSectionTitle("Datos del Local"),
             _buildCard([
