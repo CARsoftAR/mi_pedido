@@ -31,7 +31,7 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _loadPreciosConfig();
   }
 
@@ -39,14 +39,12 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
     try {
       final doc = await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').get();
       if (doc.exists) setState(() => _preciosConfig = doc.data());
-    } catch (e) {
-      debugPrint("Error: $e");
-    }
+    } catch (e) { debugPrint("Error: $e"); }
   }
 
   Future<void> _pickImage(StateSetter setModalState) async {
     try {
-      final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 25, maxWidth: 450);
+      final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 20, maxWidth: 450);
       if (pickedFile != null) {
         setModalState(() => _imageFile = File(pickedFile.path));
         setState(() => _imageFile = File(pickedFile.path));
@@ -54,9 +52,31 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
     } catch (e) { _showError("Error imagen: $e"); }
   }
 
+  // Lógica funcional para Borrar Producto
+  void _deleteProduct(String id) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("¿Eliminar Ítem?", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
+        content: const Text("Esta acción borrará el ítem de la carta permanentemente."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCELAR")),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("BORRAR", style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await FirebaseFirestore.instance.collection('productos').doc(id).delete();
+      if (mounted) {
+        Navigator.pop(context); // Cierra el modal de edición
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Item eliminado correctamente")));
+      }
+    }
+  }
+
   void _showProductModal({String? id, Map<String, dynamic>? data, String? category}) {
     final String activeCategory = category ?? (data != null ? data['categoria'] : 'Pizza');
-
     if (id != null && data != null) {
       _editingId = id;
       _nameController.text = data['nombre'] ?? '';
@@ -84,7 +104,7 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
           return Container(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 20, top: 18, left: 25, right: 25),
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 20, top: 20, left: 25, right: 25),
             decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
             child: SingleChildScrollView(
               child: Column(
@@ -93,10 +113,9 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
                 children: [
                    Center(child: Container(width: 45, height: 4, decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(10)))),
                   const SizedBox(height: 15),
-                  Text(_editingId == null ? "Nuevo Item: $activeCategory" : "Editar Item: $activeCategory", 
+                  Text(_editingId == null ? "Nuevo Ítem: $activeCategory" : "Editar Ítem: $activeCategory", 
                     style: GoogleFonts.montserrat(fontSize: 18, fontWeight: FontWeight.bold, color: const Color(0xFFFF7F50)), textAlign: TextAlign.center),
                   const SizedBox(height: 15),
-                  
                   Center(
                     child: GestureDetector(
                       onTap: () => _pickImage(setModalState),
@@ -104,48 +123,43 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
                         height: 90, width: 90,
                         decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.orange.withOpacity(0.1))),
                         clipBehavior: Clip.antiAlias,
-                        child: _imageFile != null ? Image.file(_imageFile!, fit: BoxFit.cover) : _buildImageWidget(_currentImageUrl, Icons.add_a_photo, size: 22),
+                        child: _imageFile != null ? Image.file(_imageFile!, fit: BoxFit.cover) : _buildImageWidget(_currentImageUrl, Icons.add_a_photo, size: 25),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-
-                  _buildInput(activeCategory == 'Bebida' ? "Ej: Coca Cola 1.5L" : (activeCategory == 'Empanada' ? "Sabor (Carne, etc)" : "Nombre del Item"), _nameController, Icons.fastfood),
-                  
-                  // ELIMINADO SWITCH ESPECIAL SOLO PARA BEBIDAS
-                  if (activeCategory != 'Bebida')
+                  const SizedBox(height: 15),
+                  _buildInput(activeCategory == 'Oferta' ? "Nombre del Combo" : _getInputLabel(activeCategory), _nameController, Icons.fastfood),
+                  if (activeCategory == 'Pizza' || activeCategory == 'Empanada')
                     SwitchListTile(
                       title: Text("¿Variedad Especial?", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
-                      subtitle: Text(_isSpecial ? "Marcado como Premium ⭐" : "Versión Estándar", style: GoogleFonts.montserrat(fontSize: 11)),
-                      value: _isSpecial,
-                      activeColor: Colors.amber[700],
+                      value: _isSpecial, activeColor: Colors.amber[700],
                       secondary: Icon(Icons.star, color: _isSpecial ? Colors.amber[700] : Colors.grey[200]),
-                      onChanged: (val) {
-                        setModalState(() => _isSpecial = val);
-                        setState(() => _isSpecial = val);
-                      },
+                      onChanged: (val) { setModalState(() => _isSpecial = val); setState(() => _isSpecial = val); },
                     ),
-
-                  // Lógica de precios: Solo si NO es Empanada
                   if (activeCategory != 'Empanada')
-                    _buildInput("Precio Unitario (\$)", _priceController, Icons.attach_money, isNumeric: true)
+                    _buildInput("Precio Actual (\$)", _priceController, Icons.attach_money, isNumeric: true)
                   else
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text("Precio automático según Configuración Local.", 
+                      child: Text("Precio automático (Central de Precios).", 
                         style: GoogleFonts.montserrat(color: Colors.grey[500], fontSize: 11, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
                     ),
-
-                  _buildInput("Descripción (opcional)", _descController, Icons.description),
-
+                  _buildInput(activeCategory == 'Oferta' ? "Items unidos con +" : "Descripción corta", _descController, Icons.description),
                   const SizedBox(height: 15),
                   ElevatedButton(
                     onPressed: _isUploading ? null : () => _saveProduct(setModalState, activeCategory),
                     style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF7F50), padding: const EdgeInsets.symmetric(vertical: 18), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
                     child: _isUploading 
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : Text(_editingId == null ? "AGREGAR A MI CARTA" : "ACTUALIZAR ÍTEM", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.white)),
+                      : Text(_editingId == null ? "CARGAR A LA CARTA" : "GUARDAR CAMBIOS", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
+                  // Botón de Borrado solo si estamos editando
+                  if (_editingId != null) 
+                    TextButton.icon(
+                      onPressed: () => _deleteProduct(_editingId!),
+                      icon: const Icon(Icons.delete_forever, color: Colors.red),
+                      label: Text("BORRAR PRODUCTO 🗑️", style: GoogleFonts.montserrat(color: Colors.red, fontWeight: FontWeight.bold)),
+                    ),
                 ],
               ),
             ),
@@ -155,11 +169,19 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
     );
   }
 
+  String _getInputLabel(String category) {
+    switch (category) {
+      case 'Empanada': return "Sabor de Empanada";
+      case 'Bebida': return "Ej: Coca Cola 1.5L";
+      case 'Postre': return "Ej: Tiramisú de la casa";
+      default: return "Nombre del Producto";
+    }
+  }
+
   void _saveProduct(StateSetter setModalState, String activeCategory) async {
     if (_nameController.text.isEmpty) return;
     setModalState(() => _isUploading = true);
     setState(() => _isUploading = true);
-
     String? imageData = _currentImageUrl;
     try {
       if (_imageFile != null) {
@@ -171,7 +193,7 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
         'descripcion': _descController.text.trim(),
         'precio': activeCategory == 'Empanada' ? 0 : (double.tryParse(_priceController.text) ?? 0),
         'categoria': activeCategory,
-        'is_especial': activeCategory == 'Bebida' ? false : _isSpecial, // Forzamos false para Bebidas
+        'is_especial': (activeCategory == 'Pizza' || activeCategory == 'Empanada') ? _isSpecial : false, 
         'disponible': _isAvailable,
         'foto_url': imageData,
         'updatedAt': FieldValue.serverTimestamp(),
@@ -202,15 +224,15 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
           isScrollable: true,
           indicatorColor: const Color(0xFFFF7F50),
           labelColor: const Color(0xFFFF7F50),
-          tabs: const [ Tab(text: "PIZZAS"), Tab(text: "EMPANADAS"), Tab(text: "BEBIDAS"), Tab(text: "POSTRES") ],
+          tabs: const [ Tab(text: "OFERTAS"), Tab(text: "PIZZAS"), Tab(text: "EMPANADAS"), Tab(text: "BEBIDAS"), Tab(text: "POSTRES") ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [ _buildTabContent('Pizza'), _buildTabContent('Empanada'), _buildTabContent('Bebida'), _buildTabContent('Postre') ] 
+        children: [ _buildTabContent('Oferta'), _buildTabContent('Pizza'), _buildTabContent('Empanada'), _buildTabContent('Bebida'), _buildTabContent('Postre') ] 
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showProductModal(category: ['Pizza', 'Empanada', 'Bebida', 'Postre'][_tabController.index]), 
+        onPressed: () => _showProductModal(category: ['Oferta', 'Pizza', 'Empanada', 'Bebida', 'Postre'][_tabController.index]), 
         backgroundColor: const Color(0xFFFF7F50), child: const Icon(Icons.add, color: Colors.white)
       ),
     );
@@ -222,7 +244,7 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         final docs = snapshot.data!.docs;
-        if (docs.isEmpty) return Center(child: Text("No hay items en $category", style: GoogleFonts.montserrat(color: Colors.grey, fontSize: 12)));
+        if (docs.isEmpty) return Center(child: Text("Sin ítems en $category", style: GoogleFonts.montserrat(color: Colors.grey, fontSize: 12)));
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -231,6 +253,7 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
             final doc = docs[index];
             final prod = doc.data() as Map<String, dynamic>;
             final bool especial = prod['is_especial'] ?? false;
+            final bool isOferta = category == 'Oferta';
             
             String priceLabel = "";
             if (category == 'Empanada') {
@@ -239,25 +262,67 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
               priceLabel = "\$${prod['precio'] ?? '--'}";
             }
 
+            if (isOferta) {
+              return GestureDetector(
+                onTap: () => _showProductModal(id: doc.id, data: prod), // Habilitado para editar OFERTAS
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 15),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white, borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.red[400]!, width: 1.5),
+                    boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.06), blurRadius: 10)]
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 80, height: 80,
+                        decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(15)),
+                        clipBehavior: Clip.antiAlias,
+                        child: _buildImageWidget(prod['foto_url'], Icons.local_offer, size: 30),
+                      ),
+                      const SizedBox(width: 15),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
+                            const SizedBox(height: 6),
+                            ..._buildOfertaLines(prod['descripcion'] ?? ""),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.bottomRight,
+                              child: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: Colors.red, fontSize: 22)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
             return Container(
               margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6)]),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
               child: ListTile(
                 onTap: () => _showProductModal(id: doc.id, data: prod),
                 leading: Container(
-                  width: 45, height: 45,
+                  width: 50, height: 50,
                   decoration: BoxDecoration(color: const Color(0xFFFF7F50).withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
                   clipBehavior: Clip.antiAlias,
                   child: _buildImageWidget(prod['foto_url'], Icons.restaurant),
                 ),
                 title: Row(
                   children: [
-                    Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text(prod['nombre'], style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 14)),
                     if (especial) Container(margin: const EdgeInsets.only(left: 4), padding: const EdgeInsets.all(2), decoration: BoxDecoration(color: Colors.amber[100], borderRadius: BorderRadius.circular(4)), child: Text("⭐", style: TextStyle(fontSize: 8))),
                   ],
                 ),
-                subtitle: Text(prod['descripcion'] ?? "", style: GoogleFonts.montserrat(fontSize: 10), maxLines: 1),
-                trailing: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: const Color(0xFFFF7F50), fontSize: 14)),
+                subtitle: Text(prod['descripcion'] ?? "", style: GoogleFonts.montserrat(fontSize: 11), maxLines: 1),
+                trailing: Text(priceLabel, style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: const Color(0xFFFF7F50), fontSize: 15)),
               ),
             );
           },
@@ -266,7 +331,30 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
     );
   }
 
-  Widget _buildImageWidget(String? imageData, IconData fallbackIcon, {double size = 22}) {
+  List<Widget> _buildOfertaLines(String desc) {
+    final List<String> lines = desc.split(RegExp(r'\s*\+\s*'));
+    return lines.map((line) {
+      String emoji = "✨";
+      String lower = line.toLowerCase();
+      if (lower.contains("pizza")) emoji = "🍕";
+      else if (lower.contains("empanada")) emoji = "🥟";
+      else if (lower.contains("coca") || lower.contains("bebida") || lower.contains("cerveza") || lower.contains("sprite")) emoji = "🥤";
+      else if (lower.contains("helado") || lower.contains("postre")) emoji = "🍰";
+
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 10)),
+            const SizedBox(width: 6),
+            Expanded(child: Text(line.trim(), style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[700]), maxLines: 1, overflow: TextOverflow.ellipsis)),
+          ],
+        ),
+      );
+    }).toList();
+  }
+
+  Widget _buildImageWidget(String? imageData, IconData fallbackIcon, {double size = 25}) {
     if (imageData == null || imageData.isEmpty) return Center(child: Icon(fallbackIcon, color: const Color(0xFFFF7F50), size: size));
     try { return Image.memory(base64Decode(imageData), fit: BoxFit.cover, errorBuilder: (c, e, s) => Center(child: Icon(fallbackIcon, size: size)));
     } catch (e) { return Center(child: Icon(fallbackIcon, size: size)); }
@@ -279,11 +367,11 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
 
   Widget _buildInput(String label, TextEditingController controller, IconData icon, {bool isNumeric = false}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: TextField(
         controller: controller,
         keyboardType: isNumeric ? TextInputType.number : TextInputType.text,
-        style: GoogleFonts.montserrat(fontSize: 13),
+        style: GoogleFonts.montserrat(fontSize: 14),
         decoration: _inputDecoration(label, icon),
       ),
     );
@@ -292,10 +380,10 @@ class _ProductListScreenState extends State<ProductListScreen> with SingleTicker
   InputDecoration _inputDecoration(String label, IconData icon) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, color: const Color(0xFFFF7F50).withOpacity(0.7), size: 16),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+      prefixIcon: Icon(icon, color: const Color(0xFFFF7F50).withOpacity(0.7), size: 18),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
       filled: true, fillColor: Colors.grey[50], 
-      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+      contentPadding: const EdgeInsets.symmetric(vertical: 12),
     );
   }
 }
