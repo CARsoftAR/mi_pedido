@@ -13,21 +13,11 @@ class ClientCartaScreen extends StatefulWidget {
 class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   Map<String, dynamic>? _preciosConfig;
-  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
-    _loadInitialData();
-  }
-
-  void _loadInitialData() async {
-    try {
-      final doc = await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').get();
-      if (doc.exists) setState(() => _preciosConfig = doc.data());
-    } catch (e) { debugPrint("Error: $e"); }
-    setState(() => _isLoading = false);
   }
 
   bool _isStoreOpenNow() {
@@ -65,50 +55,67 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
     else if (value is String) price = double.tryParse(value.replaceAll(',', '.')) ?? 0;
     return "\$${price.toStringAsFixed(2).replaceAll('.', ',')}";
   }
-
   @override
   Widget build(BuildContext context) {
-    final bool isOpen = _isStoreOpenNow();
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('configuracion_local').doc('precios').snapshots(),
+      builder: (context, configSnapshot) {
+        if (!configSnapshot.hasData) return const Center(child: CircularProgressIndicator());
+        
+        _preciosConfig = configSnapshot.data!.data() as Map<String, dynamic>?;
+        final bool isOpen = _isStoreOpenNow();
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
-      body: Column(
-        children: [
-          _buildHeader(isOpen),
-          if (!isOpen) _buildClosedBanner(),
-          Expanded(
-            child: _isLoading 
-                ? const Center(child: CircularProgressIndicator()) 
-                : Container(
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                    ),
-                    child: Column(
-                      children: [
-                        TabBar(
-                          controller: _tabController,
-                          isScrollable: true,
-                          indicatorWeight: 4,
-                          indicatorSize: TabBarIndicatorSize.label,
-                          indicatorColor: const Color(0xFFFF7F50),
-                          labelColor: const Color(0xFFFF7F50),
-                          unselectedLabelColor: Colors.grey,
-                          labelStyle: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13),
-                          tabs: const [ Tab(text: "PROMOS"), Tab(text: "PIZZAS"), Tab(text: "EMPANADAS"), Tab(text: "BEBIDAS"), Tab(text: "POSTRES") ],
-                        ),
-                        Expanded(
-                          child: TabBarView(
-                            controller: _tabController,
-                            children: [ _buildCardList('Oferta'), _buildCardList('Pizza'), _buildCardList('Empanada'), _buildCardList('Bebida'), _buildCardList('Postre') ],
-                          ),
-                        ),
-                      ],
-                    ),
+        return Scaffold(
+          backgroundColor: const Color(0xFFF9F9F9),
+          body: Column(
+            children: [
+              _buildHeader(isOpen),
+              if (!isOpen) _buildClosedBanner(),
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
                   ),
+                  child: Column(
+                    children: [
+                      TabBar(
+                        controller: _tabController,
+                        isScrollable: true,
+                        indicatorWeight: 4,
+                        indicatorSize: TabBarIndicatorSize.label,
+                        indicatorColor: const Color(0xFFFF7F50),
+                        labelColor: const Color(0xFFFF7F50),
+                        unselectedLabelColor: Colors.grey,
+                        labelStyle: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13),
+                        tabs: const [
+                          Tab(text: "PROMOS"),
+                          Tab(text: "PIZZAS"),
+                          Tab(text: "EMPANADAS"),
+                          Tab(text: "BEBIDAS"),
+                          Tab(text: "POSTRES")
+                        ],
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: [
+                            _buildCardList('Oferta'),
+                            _buildCardList('Pizza'),
+                            _buildCardList('Empanada'),
+                            _buildCardList('Bebida'),
+                            _buildCardList('Postre')
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
