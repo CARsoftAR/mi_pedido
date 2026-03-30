@@ -74,6 +74,41 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
     }
   }
 
+  bool _isStoreOpenNow() {
+    if (!_localAbiertoManual) return false;
+
+    try {
+      final String horarioRaw = _horarioController.text.trim().toLowerCase();
+      // Soporta formatos "20:00 a 02:00", "20:00 - 02:00", "20:00 02:00"
+      final parts = horarioRaw.split(RegExp(r'[\sa\-]+')).where((e) => e.isNotEmpty).toList();
+      if (parts.length < 2) return true; // Si el formato no es claro, dependemos del switch
+
+      final String startStr = parts[0].trim();
+      final String endStr = parts[parts.length - 1].trim();
+
+      // Parseamos horas y minutos manualmente para evitar dependencias de fecha
+      final startParts = startStr.split(':');
+      final endParts = endStr.split(':');
+      
+      final double startVal = double.parse(startParts[0]) + (double.parse(startParts[1]) / 60.0);
+      final double endVal = double.parse(endParts[0]) + (double.parse(endParts[1]) / 60.0);
+      
+      final now = DateTime.now();
+      final double nowVal = now.hour + (now.minute / 60.0);
+
+      if (endVal < startVal) {
+        // Horario cruzado (ej: 20:00 a 02:00)
+        return (nowVal >= startVal || nowVal < endVal);
+      } else {
+        // Horario normal (ej: 10:00 a 20:00)
+        return (nowVal >= startVal && nowVal < endVal);
+      }
+    } catch (e) {
+      debugPrint("Error parseando horario: $e");
+      return true; // Ante error, permitimos si el switch está ON
+    }
+  }
+
   void _guardarConfiguracion() async {
     setState(() => _isSaving = true);
     try {
@@ -229,17 +264,19 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(
-                  _localAbiertoManual ? "LOCAL ABIERTO ✅" : "LOCAL CERRADO ❌",
+                  _isStoreOpenNow() ? "LOCAL ABIERTO ✅" : "LOCAL CERRADO ❌",
                   style: GoogleFonts.montserrat(
                     fontWeight: FontWeight.w900,
                     fontSize: 16,
-                    color: _localAbiertoManual ? Colors.green[700] : Colors.red[700],
+                    color: _isStoreOpenNow() ? Colors.green[700] : Colors.red[700],
                   ),
                 ),
                 subtitle: Text(
-                  _localAbiertoManual 
-                    ? "El local sigue el horario programado" 
-                    : "CERRADO TEMPORALMENTE (ignora horario)",
+                  !_localAbiertoManual 
+                    ? "CERRADO TEMPORALMENTE (Manual)" 
+                    : (_isStoreOpenNow() 
+                        ? "El local está recibiendo pedidos" 
+                        : "Fuera de horario comercial (${_horarioController.text})"),
                   style: GoogleFonts.montserrat(fontSize: 12),
                 ),
                 value: _localAbiertoManual,
