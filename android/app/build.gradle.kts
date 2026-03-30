@@ -22,20 +22,30 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        namespace = "com.mipedido.pizzeria"
         applicationId = "com.mipedido.pizzeria"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "app"
+    productFlavors {
+        create("admin") {
+            dimension = "app"
+            applicationId = "com.pizzeriagonzalo.admin"
+            resValue("string", "app_name", "Admin Gonzalo")
+        }
+        create("cliente") {
+            dimension = "app"
+            applicationId = "com.pizzeriagonzalo.cliente"
+            resValue("string", "app_name", "Pizzería Gonzalo")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
