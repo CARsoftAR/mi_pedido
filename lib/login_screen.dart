@@ -20,6 +20,26 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _isRegistering = true;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
+
+  void _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? savedPhone = prefs.getString('lastPhone');
+    final String? savedPass = prefs.getString('lastPass');
+    
+    if (savedPhone != null && savedPass != null) {
+      setState(() {
+        _phoneController.text = savedPhone;
+        _passController.text = savedPass;
+        _isRegistering = false; // Cambiar a pestaña de LOGIN automáticamente
+      });
+    }
+  }
+
   Future<void> _handleAuth() async {
     if (_isRegistering) {
       if (_nameController.text.isEmpty || _addressController.text.isEmpty || _phoneController.text.isEmpty || _passController.text.isEmpty) {
@@ -38,6 +58,7 @@ class _LoginScreenState extends State<LoginScreen> {
       String userPhone = _phoneController.text.trim();
       String userName = _nameController.text.trim();
       String userAddress = _addressController.text.trim();
+      String userPass = _passController.text.trim();
 
       if (_isRegistering) {
         // Registro
@@ -53,13 +74,13 @@ class _LoginScreenState extends State<LoginScreen> {
           'direccion': userAddress,
           'detalles_direccion': _detailsController.text.trim(),
           'celular': userPhone,
-          'password': _passController.text.trim(),
+          'password': userPass,
           'createdAt': FieldValue.serverTimestamp(),
         });
       } else {
         // Login Simple
         final userDoc = await FirebaseFirestore.instance.collection('usuarios').doc(userPhone).get();
-        if (!userDoc.exists || userDoc.data()?['password'] != _passController.text.trim()) {
+        if (!userDoc.exists || userDoc.data()?['password'] != userPass) {
           _showError("Celular o contraseña incorrectos.");
           setState(() => _isLoading = false);
           return;
@@ -75,6 +96,10 @@ class _LoginScreenState extends State<LoginScreen> {
       await prefs.setString('userPhone', userPhone);
       await prefs.setString('userName', userName);
       await prefs.setString('userAddress', userAddress);
+      
+      // GUARDAR CREDENCIALES PARA AUTOCOMPLETADO
+      await prefs.setString('lastPhone', userPhone);
+      await prefs.setString('lastPass', userPass);
 
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/carta');
@@ -118,11 +143,33 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: const Icon(Icons.local_pizza_rounded, size: 60, color: Color(0xFFFF7F50)),
                 ),
                 const SizedBox(height: 25),
-                GestureDetector(
-                  onLongPress: () => Navigator.pushNamed(context, '/admin'),
-                  child: Text("Pizzería Gonzalo", style: GoogleFonts.montserrat(fontSize: 28, fontWeight: FontWeight.w900, color: const Color(0xFF2D2D2D))),
+                StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance.collection('configuracion_local').doc('precios').snapshots(),
+                  builder: (context, snapshot) {
+                    final data = snapshot.data?.data() as Map<String, dynamic>?;
+                    final String storeName = data?['nombre'] ?? 'Pizzería Miguel Angelo';
+                    final String storeSlogan = data?['slogan'] ?? 'Creá tu cuenta para pedir';
+                    
+                    return Column(
+                      children: [
+                        GestureDetector(
+                          onLongPress: () => Navigator.pushNamed(context, '/admin'),
+                          child: Text(
+                            storeName, 
+                            style: GoogleFonts.montserrat(fontSize: 28, fontWeight: FontWeight.w900, color: const Color(0xFF2D2D2D)),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          _isRegistering ? storeSlogan : "¡Qué bueno verte de nuevo!", 
+                          style: GoogleFonts.montserrat(fontSize: 14, color: Colors.grey[600]),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    );
+                  }
                 ),
-                Text(_isRegistering ? "Creá tu cuenta para pedir" : "¡Qué bueno verte de nuevo!", style: GoogleFonts.montserrat(fontSize: 14, color: Colors.grey[600])),
                 const SizedBox(height: 35),
                 
                 // Selector Dual

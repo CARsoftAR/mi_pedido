@@ -33,7 +33,7 @@ class _ProductListScreenState extends State<ProductListScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadPreciosConfig();
   }
 
@@ -501,7 +501,6 @@ class _ProductListScreenState extends State<ProductListScreen>
             Tab(text: "PIZZAS"),
             Tab(text: "EMPANADAS"),
             Tab(text: "BEBIDAS"),
-            Tab(text: "POSTRES"),
           ],
         ),
       ),
@@ -512,7 +511,6 @@ class _ProductListScreenState extends State<ProductListScreen>
           _buildTabContent('Pizza'),
           _buildTabContent('Empanada'),
           _buildTabContent('Bebida'),
-          _buildTabContent('Postre'),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -522,7 +520,6 @@ class _ProductListScreenState extends State<ProductListScreen>
             'Pizza',
             'Empanada',
             'Bebida',
-            'Postre',
           ][_tabController.index],
         ),
         backgroundColor: const Color(0xFFFF7F50),

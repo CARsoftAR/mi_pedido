@@ -1,0 +1,23 @@
+
+
+Modificaciones para la apps de Pedido YA!!
+
+1- En el comecio cuando entre un pedido, al presionar sobre el pedido, tiene que salir todos los datos del pedido
+
+Nombre del cliente
+Dirección
+Teléfono
+Pedio desglosado con su importe
+
+2- Configurar un QR para que la aplicacione se pueda bajar solo con el QR, la aplicación de clientes.
+
+3- Que aparezca la direccion del envió con el GPS. Cuando sale el pedido, que sea como UBER, que se ve a donde
+   hay que ir y que por el celular se pueda ir monitoreando al delivery
+
+
+4- Una vez el pedido llaga al Comercio, se puede modifica hasta los 5 minutos después de enviar el pedido, el tiempo de los 5 minutos se puede modificar desde la apps Comercio, el dueño del negocio pone el limite de tiempo
+
+5- Agrregar el horario de apertura y cierre
+
+Alias Mercado Pago: bonzalosc22.uala
+Celular: 2994086946

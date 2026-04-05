@@ -12,10 +12,13 @@ class ConfiguracionPage extends StatefulWidget {
 
 class _ConfiguracionPageState extends State<ConfiguracionPage> {
   final TextEditingController _nombreController = TextEditingController(text: 'Pizzería Gonzalo');
+  final TextEditingController _sloganController = TextEditingController(text: '¡Pizzería Gourmet!');
   final TextEditingController _direccionController = TextEditingController();
   final TextEditingController _horarioController = TextEditingController();
   final TextEditingController _demoraController = TextEditingController();
-  final TextEditingController _deliveryController = TextEditingController();
+  final TextEditingController _deliveryController = TextEditingController(); // Alias para Villa
+  final TextEditingController _envioBarrioController = TextEditingController();
+  final TextEditingController _envioRetiroController = TextEditingController();
   
   final TextEditingController _unidadComunController = TextEditingController();
   final TextEditingController _docenaComunController = TextEditingController();
@@ -24,6 +27,8 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
   
   final TextEditingController _aliasController = TextEditingController();
   final TextEditingController _cbuController = TextEditingController();
+  final TextEditingController _whatsappController = TextEditingController();
+  final TextEditingController _minutosEdicionController = TextEditingController(text: '5');
 
   int _estadoControl = 1; // 0=Cerrado, 1=Auto, 2=Abierto
   bool _isSaving = false;
@@ -57,10 +62,13 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         final data = doc.data()!;
         setState(() {
           _nombreController.text = data['nombre'] ?? 'Pizzería Gonzalo';
+          _sloganController.text = data['slogan'] ?? '¡Pizzas con Amor!';
           _direccionController.text = data['direccion'] ?? '';
           _horarioController.text = data['horario'] ?? '';
           _demoraController.text = data['tiempo_demora'] ?? '';
           _deliveryController.text = _formatPrice(data['precio_delivery']);
+          _envioBarrioController.text = _formatPrice(data['v_envio_barrio'] ?? 0);
+          _envioRetiroController.text = _formatPrice(data['v_envio_retiro'] ?? 0);
           
           _unidadComunController.text = _formatPrice(data['unidad_comun']);
           _docenaComunController.text = _formatPrice(data['docena_comun']);
@@ -79,6 +87,22 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
           }
         });
       }
+
+      // Cargar WhatsApp desde configuracion_negocio
+      final negocioDoc = await FirebaseFirestore.instance.collection('configuracion_negocio').doc('contacto').get();
+      if (negocioDoc.exists) {
+        setState(() {
+          _whatsappController.text = negocioDoc.data()?['whatsapp_comprobantes'] ?? '';
+        });
+      }
+
+      // Cargar tiempo de edición desde config/tiempos
+      final tiemposDoc = await FirebaseFirestore.instance.collection('config').doc('tiempos').get();
+      if (tiemposDoc.exists) {
+        setState(() {
+          _minutosEdicionController.text = (tiemposDoc.data()?['minutos_edicion'] ?? 5).toString();
+        });
+      }
     } catch (e) {
       debugPrint("Error al cargar configuración: $e");
     } finally {
@@ -90,7 +114,28 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
     if (_estadoControl == 0) return false;
     if (_estadoControl == 2) return true;
     
-    // Modo AUTO (1)
+    // Modo AUTO (1) - Lógica Dinámica
+    try {
+      final horario = _horarioController.text.toLowerCase();
+      // Buscamos números de 1 o 2 dígitos
+      final matches = RegExp(r'(\d{1,2})').allMatches(horario).toList();
+      
+      if (matches.length >= 2) {
+        int start = int.parse(matches[0].group(0)!);
+        int end = int.parse(matches[matches.length - 1].group(0)!);
+        
+        final int now = DateTime.now().hour;
+        if (start > end) { // Cruza medianoche
+          return (now >= start) || (now < end);
+        } else {
+          return (now >= start) && (now < end);
+        }
+      }
+    } catch (e) {
+      debugPrint("Error parseando horario: $e");
+    }
+
+    // Fallback original
     final int hora = DateTime.now().hour;
     return (hora >= 20) || (hora < 4);
   }
@@ -100,20 +145,37 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
     try {
       final Map<String, dynamic> data = {
         'nombre': _nombreController.text.trim(),
+        'slogan': _sloganController.text.trim(),
         'direccion': _direccionController.text.trim(),
         'horario': _horarioController.text.trim(),
         'tiempo_demora': _demoraController.text.trim(),
-        'precio_delivery': _parsePrice(_deliveryController.text),
+        'precio_delivery': _parsePrice(_deliveryController.text), // Villa
+        'v_envio_barrio': _parsePrice(_envioBarrioController.text),
+        'v_envio_retiro': _parsePrice(_envioRetiroController.text),
         'unidad_comun': _parsePrice(_unidadComunController.text),
         'docena_comun': _parsePrice(_docenaComunController.text),
         'unidad_especial': _parsePrice(_unidadEspecialController.text),
         'docena_especial': _parsePrice(_docenaEspecialController.text),
         'alias_mp': _aliasController.text.trim(),
         'cbu_cvu': _cbuController.text.trim(),
+        'whatsapp_comprobantes': _whatsappController.text.trim(),
         'estado_control': _estadoControl,
         'updated_at': FieldValue.serverTimestamp(),
       };
       await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set(data, SetOptions(merge: true));
+      
+      // Guardar WhatsApp en configuracion_negocio (Respaldo/Compatibilidad)
+      await FirebaseFirestore.instance.collection('configuracion_negocio').doc('contacto').set({
+        'whatsapp_comprobantes': _whatsappController.text.trim(),
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Guardar tiempo de edición en config/tiempos
+      await FirebaseFirestore.instance.collection('config').doc('tiempos').set({
+        'minutos_edicion': int.tryParse(_minutosEdicionController.text) ?? 5,
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuración guardada correctamente'), backgroundColor: Colors.green));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al guardar: $e'), backgroundColor: Colors.red));
@@ -304,7 +366,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
                       ? "El local ignora el reloj y figura siempre CERRADO." 
                       : (_estadoControl == 2 
                         ? "El local ignora el reloj y figura siempre ABIERTO."
-                        : "El local se abre a las 20:00 y se cierra a las 04:00."),
+                        : "El local respeta el horario: ${_horarioController.text}"),
                     style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[600]),
                   ),
                 ],
@@ -312,17 +374,35 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
             ]),
             const SizedBox(height: 20),
             
-            _buildSectionTitle("Datos del Local"),
+            _buildSectionTitle("Branding de la Tienda"),
             _buildCard([
-              _buildTextField("Nombre", _nombreController, Icons.store),
-              _buildTextField("Dirección", _direccionController, Icons.map),
+              _buildTextField("Nombre de la Pizzería", _nombreController, Icons.storefront),
+              _buildTextField("Eslogan o Frase", _sloganController, Icons.auto_awesome),
+            ]),
+
+            const SizedBox(height: 25),
+
+            _buildSectionTitle("Gestión de Envíos"),
+            _buildCard([
+              _buildTextField("Envío al Barrio \$", _envioBarrioController, Icons.local_shipping, isNumeric: true),
+              _buildTextField("Envío a la Villa \$", _deliveryController, Icons.directions_bike, isNumeric: true),
+              _buildTextField("Retiro por el Local \$", _envioRetiroController, Icons.store, isNumeric: true),
+            ]),
+
+            const SizedBox(height: 25),
+
+            _buildSectionTitle("Demora y Edición de Pedidos"),
+            _buildCard([
+              _buildTextField("Dirección del Local", _direccionController, Icons.map),
               _buildTextField("Horario de Atención", _horarioController, Icons.access_time),
-              Row(
-                children: [
-                  Expanded(child: _buildTextField("Demora (ej: 40-50 min)", _demoraController, Icons.timer)),
-                  const SizedBox(width: 10),
-                  Expanded(child: _buildTextField("Delivery \$", _deliveryController, Icons.delivery_dining, isNumeric: true)),
-                ],
+              _buildTextField("Demora estimada (ej: 40-50 min)", _demoraController, Icons.timer),
+              _buildTextField("Límite de edición (minutos)", _minutosEdicionController, Icons.edit_calendar, isNumeric: true),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  "El cliente podrá editar su pedido hasta que pasen estos minutos.",
+                  style: GoogleFonts.montserrat(fontSize: 10, color: Colors.blueGrey[400], fontStyle: FontStyle.italic),
+                ),
               ),
             ]),
             
@@ -357,11 +437,12 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
             _buildSectionTitle("Cobros (Mercado Pago / Transferencia)"),
             _buildCard([
               _buildTextField("Alias Mercado Pago", _aliasController, Icons.account_balance_wallet_outlined),
-              _buildTextField("CBU / CVU", _cbuController, Icons.credit_card_outlined),
+              _buildTextField("Teléfono", _cbuController, Icons.phone_android),
+              _buildTextField("WhatsApp para Comprobantes", _whatsappController, Icons.chat_bubble_outline, isPhone: true),
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
                 child: Text(
-                  "Estos datos se mostrarán al cliente al finalizar su pedido para que pueda realizar el pago.",
+                  "Este número se usará para recibir los comprobantes de transferencia.",
                   style: GoogleFonts.montserrat(fontSize: 11, color: Colors.grey[500], fontStyle: FontStyle.italic),
                   textAlign: TextAlign.center,
                 ),
@@ -500,12 +581,12 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
     );
   }
 
-  Widget _buildTextField(String label, TextEditingController controller, IconData icon, {bool isNumeric = false}) {
+  Widget _buildTextField(String label, TextEditingController controller, IconData icon, {bool isNumeric = false, bool isPhone = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: TextField(
         controller: controller,
-        keyboardType: isNumeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
+        keyboardType: isNumeric || isPhone ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
         style: GoogleFonts.montserrat(fontSize: 14, fontWeight: FontWeight.w500),
         decoration: InputDecoration(
           labelText: label,

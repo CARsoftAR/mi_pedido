@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:pizzeria/login_screen.dart';
-import 'package:pizzeria/client_carta_screen.dart';
+import 'splash_screen.dart'; // IMPORT DEL SPLASH
+import 'login_screen.dart';
+import 'client_carta_screen.dart';
+import 'profile_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,31 +14,31 @@ void main() async {
     debugPrint("Firebase Error: $e");
   }
   
-  final prefs = await SharedPreferences.getInstance();
-  final bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-  
-  runApp(ClientApp(isLoggedIn: isLoggedIn));
+  runApp(const ClientApp());
 }
 
 class ClientApp extends StatelessWidget {
-  final bool isLoggedIn;
-  const ClientApp({super.key, required this.isLoggedIn});
+  const ClientApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pizzería Gonzalo',
+      title: 'Pizzería Miguel Angelo',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         textTheme: GoogleFonts.montserratTextTheme(),
-        scaffoldBackgroundColor: const Color(0xFFF9F9F9),
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFFF7F50)),
+        scaffoldBackgroundColor: const Color(0xFF1A1A1A), // Fondo oscuro para que combine con el splash
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFFF7F50),
+          brightness: Brightness.dark,
+        ),
       ),
-      home: isLoggedIn ? const ClientCartaScreen() : const LoginScreen(),
+      home: const SplashScreen(), // EL PUNTO DE ENTRADA AHORA ES EL SPLASH
       routes: {
         '/login': (context) => const LoginScreen(),
         '/carta': (context) => const ClientCartaScreen(),
+        '/perfil': (context) => const ProfileScreen(),
       },
     );
   }

@@ -8,9 +8,13 @@ plugins {
 
 android {
     namespace = "com.mipedido.pizzeria"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 34
     ndkVersion = flutter.ndkVersion
     buildToolsVersion = "34.0.0"
+
+    buildFeatures {
+        buildConfig = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -25,7 +29,7 @@ android {
         namespace = "com.mipedido.pizzeria"
         applicationId = "com.mipedido.pizzeria"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
