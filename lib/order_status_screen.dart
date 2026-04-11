@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'client_carta_screen.dart';
 
 class OrderStatusScreen extends StatefulWidget {
   final String orderId;
@@ -13,292 +13,313 @@ class OrderStatusScreen extends StatefulWidget {
 }
 
 class _OrderStatusScreenState extends State<OrderStatusScreen> {
-  int _minutosLimite = 5;
-  late Stream<int> _timerStream;
 
   @override
   void initState() {
     super.initState();
-    _fetchLimit();
-    _timerStream = Stream.periodic(const Duration(seconds: 1), (i) => i);
   }
 
-  void _fetchLimit() async {
-    final doc = await FirebaseFirestore.instance.collection('config').doc('tiempos').get();
-    if (doc.exists) {
-      setState(() {
-        _minutosLimite = doc.data()?['minutos_edicion'] ?? 5;
-      });
-    }
-  }
-
-  void _iniciarEdicion(Map<String, dynamic> data) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          "¿Modificar este Pedido?", 
-          style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: const Color(0xFF2D2D2D))
-        ),
-        content: Text(
-          "Tus productos actuales se cargarán de nuevo en la bolsa para que puedas editarlos. El pedido seguirá vigente en el comercio como 'Modificando'.",
-          style: GoogleFonts.montserrat(color: Colors.grey[700], fontSize: 14)
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text("VOLVER", style: GoogleFonts.montserrat(color: Colors.grey, fontWeight: FontWeight.bold)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF7F50),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: Text("EDITAR AHORA", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      // 1. Cambiamos el estado a 'modificando' en Firestore
-      await FirebaseFirestore.instance.collection('pedidos').doc(widget.orderId).update({
-        'estado': 'modificando'
-      });
-      
-      if (mounted) {
-        // 2. Limpiamos navegación y vamos a la carta de forma directa
-        Navigator.pushNamedAndRemoveUntil(context, '/carta', (route) => false);
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('pedidos').doc(widget.orderId).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return Scaffold(body: Center(child: Text("Error: ${snapshot.error}")));
-        if (!snapshot.hasData || !snapshot.data!.exists) {
-          return Scaffold(
-            appBar: AppBar(title: const Text("Pedido")),
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.search_off, size: 50, color: Colors.grey),
-                  const SizedBox(height: 20),
-                  const Text("No pudimos encontrar el estado de tu pedido."),
-                  TextButton(onPressed: () => Navigator.pop(context), child: const Text("VOLVER AL MENÚ")),
-                ],
-              ),
-            ),
-          );
-        }
-
+        if (!snapshot.hasData || !snapshot.data!.exists) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        
         final data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
         final String estado = data['estado'] ?? 'Pendiente';
-        final String? motivoRechazo = data['motivo_rechazo'];
-        final Timestamp? createdAt = data['createdAt'];
+        final String productosStr = (data['productos'] as List? ?? []).map((p) => p['nombre']).join(", ");
 
-        int minutosRestantes = 0;
-        bool canEdit = false;
-        if (estado == 'Pendiente' || estado == 'En Preparación' || estado == 'modificando') {
-          if (createdAt == null) {
-            canEdit = true;
-            minutosRestantes = _minutosLimite;
-          } else {
-            final diff = DateTime.now().difference(createdAt.toDate()).inMinutes;
-            minutosRestantes = _minutosLimite - diff;
-            if (minutosRestantes > 0) {
-              canEdit = true;
-            } else {
-              minutosRestantes = 0;
-            }
-          }
-        }
-
-        final bool isFinished = estado == 'Finalizado' || estado == 'Cancelado';
-        final bool canGoBack = isFinished || estado == 'modificando';
-
-        return PopScope(
-          canPop: canGoBack,
-          onPopInvoked: (didPop) {
-            if (didPop) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Tu pedido está en curso. No podés volver al menú ahora.")),
-            );
-          },
-          child: Scaffold(
-            backgroundColor: Colors.white,
-            appBar: AppBar(
-              title: Text("Estado de tu Pedido", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18)),
-              centerTitle: true,
-              backgroundColor: Colors.white,
-              elevation: 0,
-              foregroundColor: Colors.black,
-              automaticallyImplyLeading: isFinished,
-            ),
-            body: Column(
-              children: [
-                if (canEdit && estado != 'modificando')
-                  _buildTimerBanner(minutosRestantes),
-                
-                if (estado == 'Cancelado')
-                  _buildStatusBanner(
-                    "Tu pedido fue rechazado",
-                    "Motivo: ${motivoRechazo ?? 'No especificado'}",
-                    Colors.red,
-                    Icons.cancel,
-                  )
-                else if (estado == 'En Preparación')
-                  _buildStatusBanner(
-                    "¡Pedido Aceptado!",
-                    "Ya estamos preparando tu pizza",
-                    Colors.green,
-                    Icons.check_circle,
-                  )
-                else if (estado == 'Despachado')
-                  _buildStatusBanner(
-                    "¡Pedido en Camino!",
-                    "El repartidor está yendo a tu domicilio",
-                    Colors.blue,
-                    Icons.delivery_dining,
-                  )
-                else if (estado == 'Finalizado')
-                  _buildStatusBanner(
-                    "¡Pedido Entregado!",
-                    "¡Que disfrutes tu comida!",
-                    Colors.black,
-                    Icons.verified,
+        return Scaffold(
+          backgroundColor: const Color(0xFF121212), // Fondo oscuro para resaltar Glassmorphism
+          body: Stack(
+            children: [
+              // Fondo con gradiente sutil
+              Positioned.fill(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF1A1A1A), Color(0xFF000000)],
+                    ),
                   ),
+                ),
+              ),
 
-                Expanded(
-                  child: Center(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildStatusIcon(estado),
-                          const SizedBox(height: 30),
-                          Text(
-                            _getStatusTitle(estado),
-                            style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 24, color: _getStatusColor(estado)),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 10),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 40),
-                            child: Text(
-                              _getStatusDescription(estado),
-                              style: GoogleFonts.montserrat(fontSize: 14, color: Colors.grey[600]),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        ],
+              SafeArea(
+                child: Column(
+                  children: [
+                    _buildPremiumHeader(estado),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 20),
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 10),
+                            _buildGlassStatusCard(estado, productosStr),
+                            const SizedBox(height: 30),
+                            _buildProgressTrack(estado),
+                            const SizedBox(height: 40),
+                            _buildOrderSummary(data),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
-                
-                if (canEdit)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 10),
-                    child: ElevatedButton.icon(
-                      onPressed: estado == 'modificando' ? null : () => _iniciarEdicion(data),
-                      icon: Icon(estado == 'modificando' ? Icons.sync : Icons.edit, color: Colors.white),
-                      label: Text(estado == 'modificando' ? "ESTÁS EDITANDO..." : "MODIFICAR MI PEDIDO"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: estado == 'modificando' ? Colors.grey : Colors.orange[800],
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 50),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                      ),
-                    ),
-                  ),
-                
-                if (isFinished)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 25, right: 25, bottom: 10),
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text("VOLVER AL MENÚ", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 25),
-                  child: TextButton(
-                    onPressed: () async {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.remove('editingOrderId'); // <<< IMPORTANTE: Para que el nuevo pedido sea NUEVO
-                      if (context.mounted) {
-                        Navigator.pushNamedAndRemoveUntil(context, '/carta', (route) => false);
-                      }
-                    },
-                    child: Text(
-                      "VER EL MENÚ", 
-                      style: GoogleFonts.montserrat(color: Colors.grey[600], fontWeight: FontWeight.bold, decoration: TextDecoration.underline)
-                    ),
-                  ),
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.only(top: 10, bottom: 25),
-                  child: Text(
-                    "Orden: #${widget.orderId.length > 6 ? widget.orderId.substring(widget.orderId.length - 6).toUpperCase() : widget.orderId.toUpperCase()}",
-                    style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         );
       },
     );
   }
 
-  Widget _buildTimerBanner(int minutos) {
-    return StreamBuilder<int>(
-      stream: _timerStream,
-      builder: (context, _) {
-        return Container(
-          width: double.infinity,
-          color: Colors.amber[700],
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Center(
-            child: Text(
-              "Podés editar tu pedido durante los próximos $minutos minutos ⏳",
-              style: GoogleFonts.montserrat(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-            ),
-          ),
-        );
-      }
+  Widget _buildPremiumHeader(String estado) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const ClientCartaScreen()), (route) => false), icon: const Icon(Icons.close, color: Colors.white70)),
+          Text("ESTADO DE PEDIDO", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 13)),
+          const SizedBox(width: 48), // Equilibrar el botón de cierre
+        ],
+      ),
     );
   }
 
-  Widget _buildStatusBanner(String title, String subtitle, Color color, IconData icon) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        border: Border(bottom: BorderSide(color: color.withOpacity(0.2))),
+  Widget _buildGlassStatusCard(String estado, String productosStr) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(35),
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.08),
+          border: Border.all(color: Colors.white.withOpacity(0.15), width: 1.5),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(35),
+          child: Column(
+            children: [
+              // Icono Animado / Central
+              _buildLargeAnimatedIcon(estado),
+              const SizedBox(height: 25),
+              Text(
+                _getStatusTitle(estado).toUpperCase(),
+                style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: 1),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                estado == 'En Preparación' 
+                  ? "Ya estamos cocinando tu combo de: $productosStr. ¡Casi listo!"
+                  : _getStatusDescription(estado),
+                style: GoogleFonts.montserrat(color: Colors.white70, fontSize: 13, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              if (estado == 'Pendiente') ...[
+                const SizedBox(height: 25),
+                ElevatedButton.icon(
+                  onPressed: () => _confirmarModificacion(context),
+                  icon: const Icon(Icons.edit_note, color: Colors.white),
+                  label: Text("MODIFICAR MI PEDIDO", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF7F50),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      child: Row(
+    );
+  }
+
+  void _confirmarModificacion(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: Text("¿Modificar pedido?", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text("El pedido volverá al carrito para que puedas editarlo. ¿Continuar?", style: GoogleFonts.montserrat(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: Text("CANCELAR", style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(c);
+              await FirebaseFirestore.instance.collection('pedidos').doc(widget.orderId).update({'estado': 'modificando'});
+              if (mounted) {
+                Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const ClientCartaScreen()), (route) => false);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF7F50)),
+            child: const Text("SÍ, MODIFICAR", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLargeAnimatedIcon(String estado) {
+    IconData icon = Icons.timer_outlined;
+    if (estado == 'En Preparación') icon = Icons.local_pizza;
+    if (estado == 'listo_para_despacho') icon = Icons.outdoor_grill;
+    if (estado == 'Despachado') icon = Icons.delivery_dining;
+    if (estado == 'Finalizado') icon = Icons.verified;
+    if (estado == 'Cancelado') icon = Icons.cancel;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(seconds: 2),
+      builder: (context, value, child) {
+        return Transform.scale(
+          scale: 0.9 + (0.1 * value),
+          child: Container(
+            padding: const EdgeInsets.all(25),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFFFF7F50).withOpacity(0.15 * value),
+              boxShadow: [
+                BoxShadow(color: const Color(0xFFFF7F50).withOpacity(0.1), blurRadius: 30, spreadRadius: 10),
+              ],
+            ),
+            child: Icon(icon, size: 70, color: const Color(0xFFFF7F50)),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildProgressTrack(String estado) {
+    int activeStep = 0;
+    if (estado == 'En Preparación' || estado == 'listo_para_despacho') activeStep = 1;
+    if (estado == 'Despachado' || estado == 'Finalizado') activeStep = 2;
+
+    return Row(
+      children: [
+        _buildStepIndicator("Confirmado", activeStep >= 0, true),
+        _buildStepLine(activeStep >= 1),
+        _buildStepIndicator("Cocinando", activeStep >= 1, false),
+        _buildStepLine(activeStep >= 2),
+        _buildStepIndicator("En Camino", activeStep >= 2, false),
+      ],
+    );
+  }
+
+  Widget _buildStepIndicator(String label, bool isDone, bool isFirst) {
+    return Expanded(
+      child: Column(
         children: [
-          Icon(icon, color: color, size: 30),
-          const SizedBox(width: 15),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Container(
+            width: 30, height: 30,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isDone ? const Color(0xFFFF7F50) : Colors.white12,
+              border: Border.all(color: isDone ? Colors.white : Colors.transparent, width: 2),
+            ),
+            child: isDone ? const Icon(Icons.check, size: 16, color: Colors.white) : null,
+          ),
+          const SizedBox(height: 10),
+          Text(label, style: GoogleFonts.montserrat(color: isDone ? Colors.white : Colors.white38, fontSize: 10, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepLine(bool isDone) {
+    return Container(
+      width: 40, height: 3,
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        color: isDone ? const Color(0xFFFF7F50) : Colors.white12,
+        borderRadius: BorderRadius.circular(10),
+      ),
+    );
+  }
+
+  String _getStatusTitle(String estado) {
+    if (estado == 'Pendiente') return "Esperando local...";
+    if (estado == 'En Preparación') return "¡Ya lo estamos preparando!";
+    if (estado == 'listo_para_despacho') return "¡Casi listo!";
+    if (estado == 'Despachado') return "¡En Camino!";
+    if (estado == 'Cancelado') return "Pedido Cancelado";
+    if (estado == 'Finalizado') return "¡Entregado!";
+    return "PROCESANDO...";
+  }
+
+  String _getStatusDescription(String estado) {
+    if (estado == 'Pendiente') return "Gonzalo está revisando tu pedido. ¡Casi empezamos!";
+    if (estado == 'En Preparación') return "Gonzalo ya está manos a la obra con tu pedido. ¡Falta muy poco!";
+    if (estado == 'listo_para_despacho') return "Tu pedido ya salió del horno y espera al repartidor.";
+    if (estado == 'Despachado') return "¡Todo listo! Tené tu mesa preparada, nosotros nos encargamos del resto.";
+    if (estado == 'Finalizado') return "¡Que lo disfrutes mucho! Gracias por elegirnos.";
+    if (estado == 'Cancelado') return "Lamentablemente el local no pudo tomar tu pedido. Contactanos por WhatsApp.";
+    return "Seguimiento en tiempo real activado.";
+  }
+
+  Widget _buildOrderSummary(Map<String, dynamic> data) {
+    final String id = widget.orderId;
+    final String shortId = id.length > 5 ? id.substring(id.length - 5).toUpperCase() : id;
+    final List productos = data['productos'] as List? ?? [];
+    
+    // Filtramos para mostrar solo los items principales (que tienen precio > 0)
+    final itemsPrincipales = productos.where((p) => (p['precio'] ?? 0) > 0).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(25),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05), 
+        borderRadius: BorderRadius.circular(25),
+        border: Border.all(color: Colors.white.withOpacity(0.1))
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text("ORDEN #$shortId", style: GoogleFonts.montserrat(color: Colors.white38, fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.5)),
+              Text(data['metodo_pago']?.toUpperCase() ?? 'EFECTIVO', style: GoogleFonts.montserrat(color: const Color(0xFF00B1EA), fontWeight: FontWeight.w900, fontSize: 10)),
+            ],
+          ),
+          const SizedBox(height: 20),
+          
+          // Resumen simple de productos (solo principales)
+          ...itemsPrincipales.map((p) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
               children: [
-                Text(title, style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
-                Text(subtitle, style: GoogleFonts.montserrat(fontSize: 13, color: color.withOpacity(0.8))),
+                const Icon(Icons.check_circle_outline, color: Colors.white24, size: 14),
+                const SizedBox(width: 8),
+                Text("${p['cantidad']}x ${p['nombre']}", style: GoogleFonts.montserrat(color: Colors.white.withOpacity(0.85), fontSize: 13, fontWeight: FontWeight.w500)),
+              ],
+            ),
+          )),
+          
+          const Divider(color: Colors.white10, height: 40),
+          
+          _buildPaymentSummaryRow("TOTAL A PAGAR", "\$${data['total']?.toString() ?? '0'}", isTotal: true),
+          
+          if (data['metodo_pago'] == 'Efectivo' && data['paga_con'] != null) ...[
+            const SizedBox(height: 12),
+            _buildPaymentSummaryRow("ABONA CON", "\$${data['paga_con']}"),
+          ],
+
+          const SizedBox(height: 25),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(15)),
+            child: Row(
+              children: [
+                const Icon(Icons.location_on, color: Color(0xFFFF7F50), size: 16),
+                const SizedBox(width: 10),
+                Expanded(child: Text(data['direccion_entrega'] ?? 'GPS Capturado', style: GoogleFonts.montserrat(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold))),
               ],
             ),
           ),
@@ -307,63 +328,14 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     );
   }
 
-  Widget _buildStatusIcon(String estado) {
-    IconData icon = Icons.timer_outlined;
-    Color color = Colors.orange;
-
-    if (estado == 'En Preparación') {
-      icon = Icons.local_pizza_outlined;
-      color = Colors.green;
-    } else if (estado == 'Despachado') {
-      icon = Icons.delivery_dining_outlined;
-      color = Colors.blue;
-    } else if (estado == 'Cancelado') {
-      icon = Icons.error_outline;
-      color = Colors.red;
-    } else if (estado == 'Finalizado') {
-      icon = Icons.verified_outlined;
-      color = Colors.black;
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(30),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
-      child: Icon(icon, size: 80, color: color),
+  Widget _buildPaymentSummaryRow(String label, String value, {bool isTotal = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: GoogleFonts.montserrat(color: Colors.white38, fontSize: 12, fontWeight: FontWeight.bold)),
+        Text(value, style: GoogleFonts.montserrat(color: isTotal ? const Color(0xFFFF7F50) : Colors.white, fontSize: isTotal ? 16 : 13, fontWeight: FontWeight.w900)),
+      ],
     );
   }
 
-  String _getStatusTitle(String estado) {
-    switch (estado) {
-      case 'Pendiente': return "ESPERANDO CONFIRMACIÓN";
-      case 'En Preparación': return "EN LA COCINA";
-      case 'Despachado': return "EN CAMINO";
-      case 'Cancelado': return "PEDIDO CANCELADO";
-      case 'Finalizado': return "ENTREGADO";
-      default: return estado.toUpperCase();
-    }
-  }
-
-  String _getStatusDescription(String estado) {
-    switch (estado) {
-      case 'Pendiente': return "Estamos esperando que Gonzalo revise tu pedido. ¡No cierres la app!";
-      case 'modificando': return "Estás editando tu pedido. ¡No olvides enviar los cambios!";
-      case 'En Preparación': return "¡Buenas noticias! Tu pizza ya está en el horno.";
-      case 'Despachado': return "Prepará el efectivo o tené la app lista, tu pedido está llegando.";
-      case 'Cancelado': return "Lo sentimos mucho. Revisá el motivo arriba o contactanos por WhatsApp.";
-      case 'Finalizado': return "¡Esperamos que lo disfrutes!";
-      default: return "";
-    }
-  }
-
-  Color _getStatusColor(String estado) {
-    switch (estado) {
-      case 'Pendiente': return Colors.orange;
-      case 'modificando': return Colors.blueGrey;
-      case 'En Preparación': return Colors.green;
-      case 'Despachado': return Colors.blue;
-      case 'Cancelado': return Colors.red;
-      case 'Finalizado': return Colors.black;
-      default: return Colors.orange;
-    }
-  }
 }

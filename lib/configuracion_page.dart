@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ConfiguracionPage extends StatefulWidget {
   const ConfiguracionPage({super.key});
@@ -11,7 +12,7 @@ class ConfiguracionPage extends StatefulWidget {
 }
 
 class _ConfiguracionPageState extends State<ConfiguracionPage> {
-  final TextEditingController _nombreController = TextEditingController(text: 'Pizzería Gonzalo');
+  final TextEditingController _nombreController = TextEditingController(text: 'Pizzería Miguel Angel');
   final TextEditingController _sloganController = TextEditingController(text: '¡Pizzería Gourmet!');
   final TextEditingController _direccionController = TextEditingController();
   final TextEditingController _horarioController = TextEditingController();
@@ -61,7 +62,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
       if (doc.exists) {
         final data = doc.data()!;
         setState(() {
-          _nombreController.text = data['nombre'] ?? 'Pizzería Gonzalo';
+          _nombreController.text = data['nombre'] ?? 'Pizzería Miguel Angel';
           _sloganController.text = data['slogan'] ?? '¡Pizzas con Amor!';
           _direccionController.text = data['direccion'] ?? '';
           _horarioController.text = data['horario'] ?? '';
@@ -162,7 +163,17 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         'estado_control': _estadoControl,
         'updated_at': FieldValue.serverTimestamp(),
       };
+      
+      // GUARDAR EN AMBOS LUGARES PARA COMPATIBILIDAD (Seguridad Gonzalo)
       await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set(data, SetOptions(merge: true));
+      
+      // ACTUALIZAR ESTADO DINÁMICO PARA EL CLIENTE (configuracion/local -> estaAbierto)
+      await FirebaseFirestore.instance.collection('configuracion').doc('local').set({
+        'estaAbierto': _checkStatus(),
+        'nombre': _nombreController.text.trim(),
+        'slogan': _sloganController.text.trim(),
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
       
       // Guardar WhatsApp en configuracion_negocio (Respaldo/Compatibilidad)
       await FirebaseFirestore.instance.collection('configuracion_negocio').doc('contacto').set({
@@ -255,6 +266,32 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.red),
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text("Cerrar Sesión"),
+                  content: const Text("¿Estás seguro de que quieres salir de la cuenta de administrador?"),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCELAR")),
+                    ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text("CERRAR SESIÓN")),
+                  ],
+                ),
+              );
+
+              if (confirmed == true) {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.clear();
+                // En la App Admin, redirige a una pantalla de salida o simplemente aviso
+                if (mounted) {
+                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sesión Cerrada. Reinicie la App.")));
+                }
+              }
+            },
+            tooltip: "Cerrar Sesión",
+          ),
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistorialCierresPage())),
@@ -553,15 +590,24 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
       child: GestureDetector(
         onTap: () async {
           setState(() => _estadoControl = value);
+          // value: 0=Cerrado, 1=Auto(Abierto), 2=Siempre Abierto
+          final bool nuevoEstado = value != 0; // 0=cerrado, 1 y 2 = abierto
           try {
+            // Escribe el estado_control para la app admin
             await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').update({
               'estado_control': value,
               'updated_at': FieldValue.serverTimestamp(),
             });
+            // SINCRONIZACIÓN EN TIEMPO REAL: escribe estaAbierto para la app cliente
+            await FirebaseFirestore.instance.collection('configuracion').doc('local').set({
+              'estaAbierto': nuevoEstado,
+              'updated_at': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
           } catch (e) {
             debugPrint("Error updating status: $e");
           }
         },
+
         child: Container(
           decoration: BoxDecoration(
             color: isSelected ? activeColor : Colors.transparent,

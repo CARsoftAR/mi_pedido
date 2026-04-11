@@ -132,6 +132,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text("GUARDAR CAMBIOS", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, letterSpacing: 1.1)),
                 ),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: Text("Cerrar Sesión", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
+                        content: Text("¿Estás seguro que querés salir?", style: GoogleFonts.montserrat()),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCELAR")),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true), 
+                            child: const Text("SALIR", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+                          ),
+                        ],
+                      ),
+                    );
+
+                    if (confirm == true) {
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.clear(); // Limpia Auth, Usuario, Datos, etc.
+                      if (mounted) {
+                        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.logout, color: Colors.white),
+                  label: Text("CERRAR SESIÓN", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    minimumSize: const Size(double.infinity, 55),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    elevation: 0,
+                  ),
+                ),
               ],
             ),
           ),

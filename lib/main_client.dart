@@ -23,7 +23,7 @@ class ClientApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pizzería Miguel Angelo',
+      title: 'Pizzería Miguel Angel',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

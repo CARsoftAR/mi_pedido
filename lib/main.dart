@@ -29,7 +29,7 @@ class MiPedidoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pizzería Gonzalo',
+      title: 'Pizzería Miguel Angel',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -39,45 +39,9 @@ class MiPedidoApp extends StatelessWidget {
       ),
       home: isLoggedIn ? const ClientCartaScreen() : const LoginScreen(),
       routes: {
-        '/admin': (context) => const AdminMainWrapper(),
         '/login': (context) => const LoginScreen(),
         '/carta': (context) => const ClientCartaScreen(),
       },
-    );
-  }
-}
-
-class AdminMainWrapper extends StatefulWidget {
-  const AdminMainWrapper({super.key});
-
-  @override
-  State<AdminMainWrapper> createState() => _AdminMainWrapperState();
-}
-
-class _AdminMainWrapperState extends State<AdminMainWrapper> {
-  int _index = 0;
-  final _pages = [
-    const OrdersScreen(),
-    const ProductListScreen(),
-    const ConfiguracionPage(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _pages[_index],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
-        selectedItemColor: const Color(0xFFFF7F50),
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.list_alt_rounded), label: 'Pedidos'),
-          BottomNavigationBarItem(icon: Icon(Icons.restaurant_menu), label: 'Carta'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Ajustes'),
-        ],
-      ),
     );
   }
 }

@@ -147,18 +147,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   stream: FirebaseFirestore.instance.collection('configuracion_local').doc('precios').snapshots(),
                   builder: (context, snapshot) {
                     final data = snapshot.data?.data() as Map<String, dynamic>?;
-                    final String storeName = data?['nombre'] ?? 'Pizzería Miguel Angelo';
+                    final String storeName = data?['nombre'] ?? 'Pizzería Miguel Angel';
                     final String storeSlogan = data?['slogan'] ?? 'Creá tu cuenta para pedir';
                     
                     return Column(
                       children: [
-                        GestureDetector(
-                          onLongPress: () => Navigator.pushNamed(context, '/admin'),
-                          child: Text(
-                            storeName, 
-                            style: GoogleFonts.montserrat(fontSize: 28, fontWeight: FontWeight.w900, color: const Color(0xFF2D2D2D)),
-                            textAlign: TextAlign.center,
-                          ),
+                        Text(
+                          storeName, 
+                          style: GoogleFonts.montserrat(fontSize: 28, fontWeight: FontWeight.w900, color: const Color(0xFF2D2D2D)),
+                          textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 5),
                         Text(
@@ -233,10 +230,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     : Text(_isRegistering ? "REGISTRARME" : "INGRESAR", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
                 const SizedBox(height: 10),
-                TextButton(
-                  onPressed: () => Navigator.pushNamed(context, '/admin'),
-                  child: Text("Acceso Administrativo", style: GoogleFonts.montserrat(color: Colors.grey, fontSize: 11)),
-                ),
+                // ELIMINADO: Acceso administrativo
               ],
             ),
           ),

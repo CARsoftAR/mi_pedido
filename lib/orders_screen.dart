@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:blue_thermal_printer/blue_thermal_printer.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -30,12 +29,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _loadAlertPreference();
-    _loadSystemRingtones();
     _initOrderListener();
-  }
-
-  Future<void> _loadSystemRingtones() async {
-    // Característica deshabilitada para mejorar compatibilidad con Android 14
   }
 
   Future<void> _loadAlertPreference() async {
@@ -70,8 +64,6 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
             for (var doc in snapshot.docs) {
               if (!_processedOrders.contains(doc.id)) {
                 _processedOrders.add(doc.id);
-                
-                // Si el diálogo ya está abierto, no acumulamos más para evitar pantalla negra
                 if (!_isShowingDialog) {
                   _playNotificationSound();
                   _showNewOrderDialog(doc);
@@ -84,10 +76,8 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
 
   Future<void> _playNotificationSound() async {
     if (_alertType == 'silent') return;
-
     try {
       if (_alertType == 'custom' && _selectedRingtoneUri != null) {
-        // SOLUCION DEFINITIVA: Usar canal nativo para saltar restricciones de MediaPlayer
         await _channel.invokeMethod('playCustomRingtone', {'uri': _selectedRingtoneUri});
       } else if (_alertType == 'alarm') {
         FlutterRingtonePlayer().playAlarm();
@@ -105,23 +95,6 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
     FlutterRingtonePlayer().stop();
     _audioPlayerInstance.stop();
     _channel.invokeMethod('stopAllSounds');
-  }
-
-  void _showRingtonePickerDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text("Melodías del Celular", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16)),
-        content: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Text("La selección de melodías personalizadas ha sido deshabilitada temporalmente para garantizar la compatibilidad con Android 14. Se usarán los tonos estándar del sistema.", style: GoogleFonts.montserrat(fontSize: 13)),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("ENTENDIDO")),
-        ],
-      ),
-    );
   }
 
   void _showNewOrderDialog(DocumentSnapshot doc) {
@@ -155,60 +128,14 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.person, color: Color(0xFFFF7F50), size: 18),
-                      const SizedBox(width: 10),
-                      Text(data['nombre_cliente'] ?? 'Desconocido', style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16)),
-                    ],
-                  ),
+                  Text(data['nombre_cliente'] ?? 'Desconocido', style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Icon(Icons.phone, color: Colors.grey, size: 18),
-                      const SizedBox(width: 10),
-                      Text(data['cliente'] ?? '--', style: GoogleFonts.montserrat(fontSize: 14)),
-                    ],
-                  ),
-                  const Divider(height: 30),
-                  
-                  if (data['metodo_pago'] != null)
-                    Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(bottom: 15),
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 15),
-                      decoration: BoxDecoration(
-                        color: data['metodo_pago'].toString().contains('TRANSFERENCIA') ? Colors.red[50] : Colors.blueGrey[50], 
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(color: data['metodo_pago'].toString().contains('TRANSFERENCIA') ? Colors.red.withOpacity(0.2) : Colors.blueGrey.withOpacity(0.2))
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            data['metodo_pago'].toString().contains('TRANSFERENCIA') ? Icons.warning_amber_rounded : Icons.payments_outlined, 
-                            color: data['metodo_pago'].toString().contains('TRANSFERENCIA') ? Colors.red[700] : Colors.blueGrey[700],
-                            size: 18
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              data['metodo_pago'].toString().contains('TRANSFERENCIA') 
-                                  ? "PAGO POR TRANSFERENCIA (Verificar MP)"
-                                  : "PAGO EN EFECTIVO (Cobrar en puerta)",
-                              style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 10, color: data['metodo_pago'].toString().contains('TRANSFERENCIA') ? Colors.red[800] : Colors.blueGrey[800]),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
                   Text("PRODUCTOS:", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey[600])),
                   const SizedBox(height: 10),
                   ...productos.map((p) => Padding(
                     padding: const EdgeInsets.only(bottom: 4),
-                    child: Text("• ${p['cantidad']}x ${p['nombre']}", style: GoogleFonts.montserrat(fontSize: 13)),
+                    child: Text("• ${p['cantidad']}x ${p['nombre']}", style: GoogleFonts.montserrat(fontSize: 13, fontWeight: FontWeight.w600)),
                   )),
-                  
                   const Divider(height: 30),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -217,24 +144,6 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                       Text("\$${data['total']}", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 24, color: const Color(0xFFFF7F50))),
                     ],
                   ),
-                  
-                  if (data['lat_cliente'] != null) ...[
-                    const SizedBox(height: 15),
-                    _buildMapsButton(
-                      (data['lat_cliente'] as num).toDouble(), 
-                      (data['long_cliente'] as num).toDouble(),
-                      isSmall: true // Usar versión pequeña en diálogos para evitar desborde
-                    ),
-                  ],
-                  if (data['paga_con'] != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 5),
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: Text("Paga con: \$${data['paga_con']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blueGrey)),
-                      ),
-                    ),
-                  
                   const SizedBox(height: 25),
                   ElevatedButton(
                     onPressed: () {
@@ -243,12 +152,10 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFFF7F50),
-                      foregroundColor: Colors.white,
                       minimumSize: const Size(double.infinity, 55),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                      elevation: 0,
                     ),
-                    child: Text("VER PEDIDO", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, letterSpacing: 1.1)),
+                    child: Text("VER PEDIDO", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: Colors.white)),
                   ),
                 ],
               ),
@@ -258,51 +165,8 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
       ),
     ).then((_) {
       _stopAllSounds();
-      if (mounted) {
-        setState(() => _isShowingDialog = false);
-      }
+      if (mounted) setState(() => _isShowingDialog = false);
     });
-  }
-
-  // ignore: unused_element
-  Future<void> _printOrder(Map<String, dynamic> data, String id) async {
-    BlueThermalPrinter bluetooth = BlueThermalPrinter.instance;
-    bool? isConnected = await bluetooth.isConnected;
-
-    if (isConnected != true) {
-      List<BluetoothDevice> devices = await bluetooth.getBondedDevices();
-      if (devices.isEmpty) return;
-      try {
-        await bluetooth.connect(devices.first);
-      } catch (e) {
-        return;
-      }
-    }
-
-    // Diseño del Ticket
-    bluetooth.printCustom("MIGUEL ANGEL", 3, 1);
-    bluetooth.printCustom("--------------------------------", 1, 1);
-    bluetooth.printCustom("PEDIDO: #${id.substring(id.length - 4)}", 2, 1);
-    bluetooth.printCustom("CLI: ${data['nombre_cliente'] ?? 'Desconocido'}", 1, 0);
-    if (data['direccion'] != null) {
-      bluetooth.printCustom("DIR: ${data['direccion']}", 1, 0);
-    }
-    bluetooth.printCustom("TEL: ${data['cliente'] ?? '--'}", 1, 0);
-    bluetooth.printCustom("--------------------------------", 1, 1);
-    
-    List productos = data['productos'] ?? [];
-    for (var p in productos) {
-      bluetooth.printCustom("${p['cantidad']}x ${p['nombre']}", 1, 0);
-    }
-    
-    bluetooth.printCustom("--------------------------------", 1, 1);
-    bluetooth.printCustom("TOTAL: \$${data['total']}", 2, 2);
-    if (data['metodo_pago'] != null) {
-       bluetooth.printCustom("PAGO: ${data['metodo_pago']}", 1, 0);
-    }
-    bluetooth.printCustom("--------------------------------", 1, 1);
-    bluetooth.printNewLine();
-    bluetooth.printNewLine();
   }
 
   @override
@@ -317,42 +181,19 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
     return Scaffold(
       backgroundColor: const Color(0xFFF9F9F9),
       appBar: AppBar(
-        title: Text("Pedidos de Hoy", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: Text("Pizzería Miguel Angel", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18)),
         centerTitle: true,
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.notifications_active, color: Color(0xFFFF7F50), size: 28),
-            onSelected: (value) {
-              if (value == 'test') {
-                _playNotificationSound();
-                if (_alertType == 'alarm' || _alertType == 'ringtone' || _alertType == 'custom') {
-                  Future.delayed(const Duration(seconds: 5), () => _stopAllSounds());
-                }
-              } else if (value == 'custom_selector') {
-                _showRingtonePickerDialog();
-              } else {
-                _saveAlertPreference(value);
-              }
+          IconButton(
+            icon: const Icon(Icons.notifications_active, color: Color(0xFFFF7F50)),
+            onPressed: () {
+              // Menú simplificado por ahora
+               _playNotificationSound();
+               Future.delayed(const Duration(seconds: 2), () => _stopAllSounds());
             },
-            itemBuilder: (context) => [
-              PopupMenuItem(value: 'test', child: Row(children: [const Icon(Icons.play_circle_fill, size: 20, color: Colors.green), const SizedBox(width: 10), Text("Probar: ${_alertType == 'custom' ? (_selectedRingtoneTitle ?? 'Tono') : _alertType}", style: const TextStyle(fontWeight: FontWeight.bold))])),
-              const PopupMenuDivider(),
-              PopupMenuItem(value: 'custom_selector', child: Row(children: [const Icon(Icons.queue_music, size: 18, color: Colors.blue), const SizedBox(width: 10), const Text("ELEGIR MELODÍA...")])),
-              const PopupMenuDivider(),
-              PopupMenuItem(value: 'notification', child: Row(children: [Icon(Icons.message, size: 18, color: _alertType == 'notification' ? Colors.orange : null), const SizedBox(width: 10), const Text("Mensaje (Corto)")])),
-              PopupMenuItem(value: 'alarm', child: Row(children: [Icon(Icons.alarm, size: 18, color: _alertType == 'alarm' ? Colors.orange : null), const SizedBox(width: 10), const Text("Alarma Sistema")])),
-              PopupMenuItem(value: 'ringtone', child: Row(children: [Icon(Icons.phone_android, size: 18, color: _alertType == 'ringtone' ? Colors.orange : null), const SizedBox(width: 10), const Text("Llamada Sistema")])),
-              PopupMenuItem(value: 'silent', child: Row(children: [Icon(Icons.volume_off, size: 18, color: _alertType == 'silent' ? Colors.orange : null), const SizedBox(width: 10), const Text("Silencio")])),
-            ],
           ),
-          if (_alertType == 'alarm' || _alertType == 'ringtone' || _alertType == 'custom') 
-            IconButton(
-              icon: const Icon(Icons.stop_circle, color: Colors.red, size: 30),
-              onPressed: () => _stopAllSounds(),
-              tooltip: "Detener Alarma",
-            ),
         ],
         bottom: TabBar(
           controller: _tabController,
@@ -374,8 +215,8 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
         children: [
           _buildOrderList('Pendiente'),
           _buildOrderList('En Preparación'),
-          _buildOrderList('Despachado'),
-          _buildOrderList('Finalizado'),
+          _buildOrderList('En Mostrador'),
+          _buildOrderList('Historial/Entregas'),
         ],
       ),
     );
@@ -383,413 +224,331 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
 
   Widget _buildOrderList(String estado) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('pedidos')
-          .where('estado', isEqualTo: estado)
-          .snapshots(),
+      stream: estado == 'En Mostrador' 
+          ? FirebaseFirestore.instance.collection('pedidos').where('estado', isEqualTo: 'listo_para_despacho').snapshots()
+          : estado == 'Historial/Entregas'
+              ? FirebaseFirestore.instance.collection('pedidos').where('estado', whereIn: ['Despachado', 'Finalizado']).snapshots()
+              : FirebaseFirestore.instance.collection('pedidos').where('estado', isEqualTo: estado).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return Center(child: Text("Error: ${snapshot.error}"));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final docs = snapshot.data!.docs;
         
-        final List<QueryDocumentSnapshot> docs = snapshot.data!.docs;
         docs.sort((a, b) {
-          final aData = a.data() as Map<String, dynamic>;
-          final bData = b.data() as Map<String, dynamic>;
-          final Timestamp? aTime = aData['createdAt'];
-          final Timestamp? bTime = bData['createdAt'];
-          
-          if (aTime == null && bTime == null) return 0;
-          if (aTime == null) return -1;
-          if (bTime == null) return 1;
-          
+          final Timestamp? aTime = (a.data() as Map)['createdAt'];
+          final Timestamp? bTime = (b.data() as Map)['createdAt'];
+          if (aTime == null || bTime == null) return 0;
           return bTime.compareTo(aTime);
         });
 
-        if (docs.isEmpty) {
-          return Center(child: Text("Sin pedidos en $estado", style: GoogleFonts.montserrat(color: Colors.grey)));
-        }
+        if (docs.isEmpty) return Center(child: Text("Sin pedidos.", style: GoogleFonts.montserrat(color: Colors.grey)));
 
         return ListView.builder(
           padding: const EdgeInsets.all(15),
           itemCount: docs.length,
           itemBuilder: (context, index) {
             final doc = docs[index];
-            final orderData = doc.data() as Map<String, dynamic>;
-            final String orderId = doc.id;
-            
-            final bool isCocina = estado == 'En Preparación';
-            
-            final bool isModificando = estado == 'modificando';
+            final data = doc.data() as Map<String, dynamic>;
+            final String id = doc.id;
+            final String status = data['estado'] ?? 'Pendiente';
+            final bool isCocina = status == 'En Preparación';
+            final bool isReadyForDispatch = status == 'listo_para_despacho';
+            final bool isEnCamino = status == 'Despachado';
 
             return Container(
-              margin: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 15),
               decoration: BoxDecoration(
-                color: isModificando ? Colors.blueGrey[50] : Colors.white,
-                borderRadius: BorderRadius.circular(15),
-                border: isModificando ? Border.all(color: Colors.blueGrey, width: 2) : null,
+                color: isReadyForDispatch ? Colors.green[50] : (isEnCamino ? Colors.blue[50] : Colors.white),
+                borderRadius: BorderRadius.circular(25),
+                border: isReadyForDispatch ? Border.all(color: Colors.green, width: 2) : (isEnCamino ? Border.all(color: Colors.blue, width: 2) : null),
                 boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10)]
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   ListTile(
-                    title: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(child: Text("${orderData['nombre_cliente'] ?? 'Cliente'} (#${orderId.substring(orderId.length - 4)})", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold))),
-                        if (isModificando)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(color: Colors.blueGrey, borderRadius: BorderRadius.circular(8)),
-                            child: Text("MODIFICANDO...", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900)),
-                          ),
-                        // La impresora queda oculta para la versión celular, se usará en la versión PC próximamente
-                        const Visibility(
-                          visible: false,
-                          child: Icon(Icons.print),
-                        ),
-                      ],
-                    ),
-                    subtitle: Column(
+                    title: Text("${data['nombre_cliente'] ?? 'Cliente'} (#${id.substring(id.length - 4)})", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 16)),
+                    trailing: isCocina ? _buildActionButton(id, status, data) : null,
+                  ),
+                  
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (!isCocina) ...[
-                          if (orderData['metodo_pago'] != null)
-                             Padding(
-                               padding: const EdgeInsets.symmetric(vertical: 4),
-                               child: Text(
-                                 orderData['metodo_pago'].toString().contains('TRANSFERENCIA') 
-                                    ? "⚠️ TRANSFERENCIA (Verificar en MP)"
-                                    : "💵 EFECTIVO (Cobrar \$${orderData['total']})",
-                                 style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.blueGrey[600]),
-                               ),
-                             ),
-                          Text("Total: \$${orderData['total']}", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                          if (orderData['paga_con'] != null)
-                            Text("Paga con \$${orderData['paga_con']}",
-                              style: const TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.grey)),
-                        ],
-                        
-                        const SizedBox(height: 8),
                         Text("PRODUCTOS:", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.grey[700])),
-                        const SizedBox(height: 4),
-                        ...(orderData['productos'] as List? ?? []).map((p) => Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: Text("• ${p['cantidad']}x ${p['nombre']}", style: GoogleFonts.montserrat(fontSize: 11, color: Colors.black87)),
-                        )),
+                        ...(data['productos'] as List? ?? []).map((p) => Text("• ${p['cantidad']}x ${p['nombre']}", style: GoogleFonts.montserrat(fontSize: 13, fontWeight: FontWeight.w700))),
                         
-                        if (!isCocina) ...[
-                          if (orderData['direccion'] != null && orderData['direccion'].toString().isNotEmpty) ...[
-                            const SizedBox(height: 10),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                        const SizedBox(height: 12),
+                        
+                        // DIRECCIÓN REAL - ALTA VISIBILIDAD
+                        if (status != 'En Preparación') ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            width: double.infinity,
+                            decoration: BoxDecoration(color: Colors.orange.withOpacity(0.08), borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.orange.withOpacity(0.2))),
+                            child: Row(
                               children: [
-                                const Icon(Icons.home, size: 16, color: Colors.blueGrey),
-                                const SizedBox(width: 8),
+                                const Icon(Icons.location_on, color: Color(0xFFFF7F50), size: 18),
+                                const SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
-                                    "ENTREGA: ${orderData['direccion']}",
-                                    style: GoogleFonts.montserrat(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blueGrey[800]),
-                                  ),
+                                    "ENTREGA: ${
+                                      (data['direccion_entrega']?.toString().isNotEmpty == true && !data['direccion_entrega'].toLowerCase().contains("calle falsa")) 
+                                      ? data['direccion_entrega'] 
+                                      : (data['lat_cliente'] != null ? '📍 UBICACIÓN POR GPS (VER MAPA)' : 'Retira en Local')
+                                    }", 
+                                    style: GoogleFonts.montserrat(fontSize: 14, fontWeight: FontWeight.w900, color: const Color(0xFF2D2D2D))
+                                  )
                                 ),
                               ],
                             ),
-                          ],
-                          
-                          if ((orderData['direccion'] == null || orderData['direccion'].toString().isEmpty) && 
-                               orderData['lat_cliente'] == null && 
-                               orderData['metodo_envio'] != 'Retiro')
-                            Padding(
-                              padding: const EdgeInsets.only(top: 10),
-                              child: Text("⚠️ Sin dirección especificada", style: TextStyle(color: Colors.red[700], fontSize: 10, fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(height: 15),
+                          const SizedBox(height: 15),
+                        ],
+
+                        // BLOQUE DE PAGO - NUEVO
+                        if (status != "En Preparación") ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.08), 
+                              borderRadius: BorderRadius.circular(15), 
+                              border: Border.all(color: Colors.blue.withOpacity(0.2))
                             ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (data['metodo_pago'] == 'Efectivo') ...[
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.payments, color: Colors.green, size: 18),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        "EFECTIVO", 
+                                        style: GoogleFonts.montserrat(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.green[800])
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Builder(builder: (context) {
+                                    double pagaCon = double.tryParse(data['paga_con'].toString()) ?? 0;
+                                    double total = (data['total'] is num) ? data['total'].toDouble() : 0.0;
+                                    double cambio = pagaCon - total;
+                                    return Text(
+                                      "💵 Paga con: \$${pagaCon.toStringAsFixed(0)} | Cambio: \$${cambio > 0 ? cambio.toStringAsFixed(0) : '0'}",
+                                      style: GoogleFonts.montserrat(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.black87)
+                                    );
+                                  }),
+                                ] else if (data['metodo_pago'] == 'Mercado Pago') ...[
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.account_balance_wallet, color: Color(0xFF00B1EA), size: 18),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        "MERCADO PAGO (Alias/CBU)", 
+                                        style: GoogleFonts.montserrat(fontSize: 12, fontWeight: FontWeight.w900, color: const Color(0xFF00779E))
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    "💳 Pago por Transferencia / App MP",
+                                    style: GoogleFonts.montserrat(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.black87)
+                                  ),
+                                ] else ...[
+                                  Text("⚠️ Sin método de pago especificado", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.red)),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 15),
+                        ],
+
+                        // ACCIONES (Si no es Cocina, lo mostramos aquí abajo para más comodidad)
+                        if (!isCocina) ...[
+                          Center(child: _buildActionButton(id, status, data)),
+                          const SizedBox(height: 15),
                         ],
                       ],
                     ),
-                    trailing: _buildActionButton(orderId, estado, orderData),
                   ),
-                  if (!isCocina && orderData['lat_cliente'] != null)
+                  
+                  if (!isCocina && data['lat_cliente'] != null)
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                      child: _buildMapsButton(
-                        (orderData['lat_cliente'] as num).toDouble(), 
-                        (orderData['long_cliente'] as num).toDouble(),
-                        isSmall: false
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                      child: _buildMapsButton(data['lat_cliente'], data['long_cliente']),
                     ),
                 ],
               ),
-              );
-            },
-          );
-        },
-      );
-    }
+            );
+          },
+        );
+      },
+    );
+  }
 
   Widget _buildActionButton(String id, String currentStatus, Map<String, dynamic> data) {
-    String nextStatus = "";
-    String label = "";
-    Color color = Colors.orange;
-
     if (currentStatus == 'Pendiente') {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ElevatedButton(
-            onPressed: () async {
-              String selectedReason = "";
-              final controller = TextEditingController();
-
-              final reason = await showDialog<String>(
-                context: context,
-                builder: (context) => StatefulBuilder(
-                  builder: (context, setDialogState) => Dialog(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                    clipBehavior: Clip.antiAlias,
-                    child: Padding(
-                      padding: const EdgeInsets.all(25),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("❌ Rechazar Pedido", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 20, color: Colors.black)),
-                          const SizedBox(height: 5),
-                          Text("Por favor, elegí un motivo para notificar al cliente.", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[600])),
-                          const SizedBox(height: 20),
-                          
-                          _buildModernReasonItem(
-                            context, 
-                            "❌ Pago no recibido", 
-                            selectedReason == "Pago no recibido", 
-                            () => setDialogState(() => selectedReason = "Pago no recibido")
-                          ),
-                          _buildModernReasonItem(
-                            context, 
-                            "🧀 Sin stock de ingrediente", 
-                            selectedReason == "Sin stock", 
-                            () => setDialogState(() => selectedReason = "Sin stock")
-                          ),
-                          _buildModernReasonItem(
-                            context, 
-                            "🛵 Fuera de zona de entrega", 
-                            selectedReason == "Fuera de zona", 
-                            () => setDialogState(() => selectedReason = "Fuera de zona")
-                          ),
-                          _buildModernReasonItem(
-                            context, 
-                            "📝 Otro motivo...", 
-                            selectedReason == "Otro", 
-                            () => setDialogState(() => selectedReason = "Otro")
-                          ),
-
-                          if (selectedReason == "Otro")
-                            Padding(
-                              padding: const EdgeInsets.only(top: 15),
-                              child: TextField(
-                                controller: controller,
-                                decoration: InputDecoration(
-                                  hintText: "Escribí acá el motivo...",
-                                  hintStyle: GoogleFonts.montserrat(fontSize: 12),
-                                  filled: true,
-                                  fillColor: Colors.grey[100],
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                                ),
-                                style: GoogleFonts.montserrat(fontSize: 13),
-                              ),
-                            ),
-                          
-                          const SizedBox(height: 30),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  child: Text("CANCELAR", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.grey[600])),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: selectedReason == "" ? null : () {
-                                    final finalReason = selectedReason == "Otro" ? controller.text : selectedReason;
-                                    if (finalReason.isNotEmpty) Navigator.pop(context, finalReason);
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    foregroundColor: Colors.white,
-                                    disabledBackgroundColor: Colors.grey[300],
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                                    padding: const EdgeInsets.symmetric(vertical: 15),
-                                  ),
-                                  child: Text("CONFIRMAR", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900)),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
-              
-              if (reason != null && reason.isNotEmpty) {
-                FirebaseFirestore.instance.collection('pedidos').doc(id).update({
-                  'estado': 'Cancelado',
-                  'motivo_rechazo': reason,
-                  'updatedAt': FieldValue.serverTimestamp(),
-                });
-
-                // Seguridad de Comisión: Log de cancelación con GPS
-                if (data['lat_cliente'] != null) {
-                  FirebaseFirestore.instance.collection('logs_cancelaciones').add({
-                    'pedido_id': id,
-                    'cliente': data['nombre_cliente'],
-                    'lat': data['lat_cliente'],
-                    'long': data['long_cliente'],
-                    'motivo': reason,
-                    'timestamp': FieldValue.serverTimestamp(),
-                  });
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red[400],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+          // BOTÓN RECHAZAR GIGANTE
+          Container(
+            decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), shape: BoxShape.circle),
+            child: IconButton(
+              iconSize: 40,
+              padding: const EdgeInsets.all(12),
+              icon: const Icon(Icons.cancel, color: Colors.red),
+              onPressed: () => _rejectOrder(id, data),
             ),
-            child: const Text("RECHAZAR", style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
           ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: () async {
-              if (data['metodo_pago'] != null && data['metodo_pago'].toString().contains('TRANSFERENCIA')) {
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                    title: Text("Confirmación", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
-                    content: const Text("¿Ya verificaste el ingreso en Mercado Pago?"),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCELAR", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))),
-                      TextButton(onPressed: () => Navigator.pop(context, true), child: Text("SÍ, EMPEZAR COCINA", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: const Color(0xFFFF7F50)))),
-                    ],
-                  ),
-                );
-                if (confirm != true) return;
-              }
-
-              FirebaseFirestore.instance.collection('pedidos').doc(id).update({
-                'estado': 'En Preparación',
-                'updatedAt': FieldValue.serverTimestamp(),
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+          const SizedBox(width: 20),
+          // BOTÓN ACEPTAR GIGANTE
+          Container(
+            decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), shape: BoxShape.circle),
+            child: IconButton(
+              iconSize: 40,
+              padding: const EdgeInsets.all(12),
+              icon: const Icon(Icons.check_circle, color: Colors.green),
+              onPressed: () => _acceptOrder(id, data),
             ),
-            child: const Text("ACEPTAR", style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
           ),
         ],
       );
     }
 
     if (currentStatus == 'En Preparación') {
-      nextStatus = 'Despachado';
-      label = 'LISTO';
-      color = Colors.blue;
-    } else if (currentStatus == 'Despachado') {
-      nextStatus = 'Finalizado';
-      label = 'ENTREGADO';
-      color = Colors.black;
-    } else {
-      return const Icon(Icons.check_circle, color: Colors.green);
+      return ElevatedButton.icon(
+        onPressed: () => FirebaseFirestore.instance.collection('pedidos').doc(id).update({'estado': 'listo_para_despacho', 'updatedAt': FieldValue.serverTimestamp()}),
+        icon: const Icon(Icons.restaurant, size: 30),
+        label: Text("LISTO", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 16)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.green,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 15),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          elevation: 5,
+        ),
+      );
     }
 
-    return ElevatedButton(
-      onPressed: () async {
-        FirebaseFirestore.instance.collection('pedidos').doc(id).update({
-          'estado': nextStatus,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-      ),
-      child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-    );
+    if (currentStatus == 'listo_para_despacho') {
+      return ElevatedButton.icon(
+        onPressed: () => _dispatchOrder(id, data),
+        icon: const Icon(Icons.delivery_dining, size: 35),
+        label: Text("DESPACHAR", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 14)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFFFF7F50),
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          elevation: 5,
+        ),
+      );
+    }
+
+    if (currentStatus == 'Despachado') {
+      return ElevatedButton(
+        onPressed: () => FirebaseFirestore.instance.collection('pedidos').doc(id).update({'estado': 'Finalizado'}),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        ),
+        child: Text("ENTREGADO", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 11)),
+      );
+    }
+
+    return const Icon(Icons.check, color: Colors.blue);
   }
 
-  Widget _buildModernReasonItem(BuildContext context, String text, bool isSelected, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 15),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.red[50] : Colors.white,
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: isSelected ? Colors.red.withOpacity(0.5) : Colors.grey.withOpacity(0.2)),
-        ),
-        child: Row(
-          children: [
-            Expanded(child: Text(text, style: GoogleFonts.montserrat(fontSize: 13, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? Colors.red[900] : Colors.black87))),
-            if (isSelected) const Icon(Icons.check_circle, color: Colors.red, size: 18),
-          ],
-        ),
-      ),
-    );
+  Future<void> _acceptOrder(String id, Map<String, dynamic> data) async {
+    if (data['metodo_pago']?.toString().contains('TRANSFERENCIA') == true) {
+      final confirm = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text("Confirmación"), content: const Text("¿Verificaste Mercado Pago?"), actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text("NO")), TextButton(onPressed: () => Navigator.pop(c, true), child: const Text("SÍ"))]));
+      if (confirm != true) return;
+    }
+    FirebaseFirestore.instance.collection('pedidos').doc(id).update({'estado': 'En Preparación', 'updatedAt': FieldValue.serverTimestamp()});
   }
 
-  Widget _buildMapsButton(double lat, double lng, {bool isSmall = false}) {
-    return InkWell(
-      onTap: () async {
-        final url = "https://www.google.com/maps/search/?api=1&query=$lat,$lng";
-        if (await canLaunchUrl(Uri.parse(url))) {
-          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-        }
-      },
-      child: Container(
-        width: double.infinity,
-        margin: EdgeInsets.symmetric(vertical: isSmall ? 12 : 15),
-        padding: EdgeInsets.symmetric(vertical: isSmall ? 15 : 20),
-        decoration: BoxDecoration(
-          color: Colors.blue[600],
-          borderRadius: BorderRadius.circular(15),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.blue.withOpacity(0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 5),
-            )
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(Icons.location_on, color: Colors.white, size: isSmall ? 18 : 22),
-            const SizedBox(width: 10),
-            Flexible(
-              child: Text(
-                "VER UBICACIÓN EN EL MAPA",
-                textAlign: TextAlign.center,
-                style: GoogleFonts.montserrat(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: isSmall ? 10 : 12, // Reducir un poco el tamaño
-                  letterSpacing: 0.2,
-                ),
-              ),
+  Future<void> _rejectOrder(String id, Map<String, dynamic> data) async {
+    String selectedReason = "";
+    final controller = TextEditingController();
+
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          Widget buildChip(String label) {
+            bool isSelected = label == selectedReason;
+            return ListTile(
+              title: Text(label, style: GoogleFonts.montserrat(fontSize: 13, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+              trailing: isSelected ? const Icon(Icons.check_circle, color: Colors.red) : null,
+              onTap: () => setDialogState(() => selectedReason = label),
+            );
+          }
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+            title: Text("❌ Rechazar Pedido", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                buildChip("Pago no recibido"),
+                buildChip("Sin stock"),
+                buildChip("Fuera de zona"),
+                buildChip("Otro"),
+                if (selectedReason == "Otro")
+                  TextField(controller: controller, decoration: const InputDecoration(hintText: "Escribí el motivo...")),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCELAR")),
+            ElevatedButton(
+              onPressed: selectedReason.isEmpty ? null : () {
+                final finalReason = selectedReason == "Otro" ? controller.text : selectedReason;
+                if (finalReason.isNotEmpty) Navigator.pop(context, finalReason);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text("CONFIRMAR", style: TextStyle(color: Colors.white)),
             ),
           ],
-        ),
-      ),
+        );
+      }),
+    );
+
+    if (reason != null && reason.isNotEmpty) {
+      FirebaseFirestore.instance.collection('pedidos').doc(id).update({
+        'estado': 'Cancelado',
+        'motivo_rechazo': reason,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  Future<void> _dispatchOrder(String id, Map<String, dynamic> data) async {
+    await FirebaseFirestore.instance.collection('pedidos').doc(id).update({'estado': 'Despachado', 'updatedAt': FieldValue.serverTimestamp()});
+    final phone = data['cliente'] ?? '';
+    final name = data['nombre_cliente'] ?? 'Cliente';
+    final address = data['direccion_entrega'] ?? data['direccion'] ?? 'tu domicilio';
+    String finalNumber = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (finalNumber.length == 10) finalNumber = "549$finalNumber";
+    final msg = "¡Hola $name! Tu pedido de Pizzería Miguel Angel ya salió del local y va en camino a $address. ¡Que lo disfrutes! 🍕🛵";
+    final url = "https://wa.me/$finalNumber?text=${Uri.encodeComponent(msg)}";
+    if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  Widget _buildMapsButton(double lat, double lng) {
+    return ElevatedButton.icon(
+      onPressed: () async {
+        final url = "https://www.google.com/maps/search/?api=1&query=$lat,$lng";
+        if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      },
+      icon: const Icon(Icons.location_on),
+      label: const Text("VER MAPA"),
+      style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[700], foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
     );
   }
 }
