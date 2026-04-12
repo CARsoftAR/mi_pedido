@@ -116,7 +116,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   },
                   blendMode: BlendMode.dstIn,
                   child: Image.asset(
-                    'assets/logo.png',
+                    'assets/logo_cliente.png',
                     width: MediaQuery.of(context).size.width * 0.85,
                     fit: BoxFit.contain,
                   ),

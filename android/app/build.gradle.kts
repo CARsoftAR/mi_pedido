@@ -8,6 +8,7 @@ plugins {
 
 android {
     namespace = "com.mipedido.pizzeria"
+    // 34+: permisos y visibilidad de medios Android 13/14; no bajar compileSdk si fallan adjuntos.
     compileSdk = 34
     ndkVersion = flutter.ndkVersion
     buildToolsVersion = "34.0.0"
@@ -44,7 +45,7 @@ android {
         create("cliente") {
             dimension = "app"
             applicationId = "com.pizzeriagonzalo.cliente"
-            resValue("string", "app_name", "Pizzería Gonzalo")
+            resValue("string", "app_name", "Pizzería Miguel Angel")
         }
     }
 

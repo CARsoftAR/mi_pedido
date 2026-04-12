@@ -15,3 +15,6 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+
+cuando hagas algun cambio en el codigo y termines, siempre compila la apk en la carpeta "C:\Apps\mi_pedido\RELEASES"

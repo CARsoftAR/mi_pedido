@@ -15,7 +15,6 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:whatsapp_share2/whatsapp_share2.dart';
-import 'package:share_plus/share_plus.dart';
 
 class ClientCartaScreen extends StatefulWidget {
   const ClientCartaScreen({super.key});
@@ -80,6 +79,47 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
     return (p as num?)?.toDouble() ?? 0.0;
   }
 
+  /// Solo dígitos, prefijo Argentina 549 para wa.me / WhatsappShare.
+  String _normalizeWhatsappArgentinaDigits(String raw) {
+    String clean = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    if (clean.startsWith('0')) clean = clean.substring(1);
+    if (clean.startsWith('15') && clean.length > 8) clean = clean.substring(2);
+    if (clean.isEmpty) return '';
+    if (!clean.startsWith('54')) {
+      clean = '549$clean';
+    } else if (clean.startsWith('54') && !clean.startsWith('549')) {
+      clean = '549${clean.substring(2)}';
+    }
+    return clean;
+  }
+
+  Future<String> _resolveWhatsappComercioDigits() async {
+    String raw = (_preciosConfig?['whatsapp_comprobantes'] ?? '').toString().trim();
+    if (raw.isEmpty) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('configuracion_negocio').doc('contacto').get();
+        raw = (doc.data()?['whatsapp_comprobantes'] ?? '').toString().trim();
+      } catch (e) {
+        debugPrint('WhatsApp contacto fallback: $e');
+      }
+    }
+    return _normalizeWhatsappArgentinaDigits(raw);
+  }
+
+  /// Copia el comprobante a ruta bajo caché o almacenamiento externo de la app (paths del FileProvider).
+  Future<File> _ensureComprobanteForContentShare(File source) async {
+    Directory dir;
+    try {
+      final ext = await getExternalStorageDirectory();
+      dir = ext ?? await getTemporaryDirectory();
+    } catch (_) {
+      dir = await getTemporaryDirectory();
+    }
+    final dest = File('${dir.path}/comprobante_mp_${DateTime.now().millisecondsSinceEpoch}.jpg');
+    await source.copy(dest.path);
+    return dest;
+  }
+
   Future<void> _restaurarPedidoEdicion() async {
     final prefs = await SharedPreferences.getInstance();
     final String? lastOrderId = prefs.getString('lastOrderId');
@@ -106,8 +146,10 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
   }
 
   void _enviarPedidoDirecto() async {
-    // COPIAR ALIAS AL PORTAPAPELES ANTES DE EMPEZAR EL FLUJO DE PAGO
-    await Clipboard.setData(const ClipboardData(text: "gonzalosc22.uala"));
+    final String aliasMp = (_preciosConfig?['alias_mp'] ?? '').toString().trim();
+    if (aliasMp.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: aliasMp));
+    }
     
     if (!_checkStatus()) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -135,7 +177,7 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
         final data = doc.data() as Map<String, dynamic>? ?? {};
         final double price = _getRawPrice(data);
         subtotal += price * qty;
-        detalleText += "• $qty x ${data['nombre']}\n";
+        detalleText += "• $qty ${data['nombre']}\n";
         productosData.add({
           'id': id,
           'nombre': data['nombre'],
@@ -322,7 +364,8 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
                         // ── DATOS DE PAGO ──
                         GestureDetector(
                           onTap: () {
-                            Clipboard.setData(const ClipboardData(text: "gonzalosc22.uala"));
+                            final a = (_preciosConfig?['alias_mp'] ?? '').toString().trim();
+                            if (a.isNotEmpty) Clipboard.setData(ClipboardData(text: a));
                             setDialogState(() => aliasCopied = true);
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("¡Alias copiado!"), duration: Duration(seconds: 1)));
                           },
@@ -337,9 +380,13 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                 Text("ALIAS: bonzalosc22.uala", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
-                                 const SizedBox(height: 4),
-                                 Text("TEL: 2994086946", style: GoogleFonts.montserrat(color: Colors.white70, fontSize: 10)),
+                                Text(
+                                  () {
+                                    final a = (_preciosConfig?['alias_mp'] ?? '').toString().trim();
+                                    return "ALIAS: ${a.isEmpty ? '—' : a}";
+                                  }(),
+                                  style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                                ),
                               ],
                             ),
                           ),
@@ -411,7 +458,18 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
                       
                       const SizedBox(height: 30),
                       ElevatedButton(
-                        onPressed: () => _enviarFinal(subtotal, detalle, productos, addressCtrl.text, lat, long, metodoPago, cashAmountCtrl.text, comprobanteFile),
+                        onPressed: () {
+                          if (metodoPago == "Mercado Pago" && comprobanteFile == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text("Adjuntá el comprobante de Mercado Pago para confirmar.", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
+                                backgroundColor: Colors.orange[800],
+                              ),
+                            );
+                            return;
+                          }
+                          _enviarFinal(subtotal, detalle, productos, addressCtrl.text, lat, long, metodoPago, cashAmountCtrl.text, comprobanteFile);
+                        },
                         style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF7F50), minimumSize: const Size(double.infinity, 55), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))),
                         child: Text("CONFIRMAR PEDIDO", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1, fontSize: 13)),
                       ),
@@ -427,7 +485,33 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
   }
 
   void _enviarFinal(double subtotal, String detalle, List<Map<String, dynamic>> productos, String finalAddress, double? lat, double? long, String metodo, String pagaCon, [File? comprobante]) async {
-    Navigator.pop(context); // Cierra el dialog
+    if (metodo == "Mercado Pago" && comprobante == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Adjuntá el comprobante de Mercado Pago para confirmar.", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
+          backgroundColor: Colors.orange[800],
+        ),
+      );
+      return;
+    }
+
+    final String finalNumber = await _resolveWhatsappComercioDigits();
+    if (finalNumber.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Falta el WhatsApp del comercio. Configuralo en la app de administración.",
+            style: GoogleFonts.montserrat(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.red[800],
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.pop(context);
 
     final prefs = await SharedPreferences.getInstance();
     final String userPhone = prefs.getString('userPhone') ?? 'Desconocido';
@@ -437,7 +521,6 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
     double totalOrder = subtotal + envio;
 
     try {
-      // Si hay comprobante, lo convertimos a base64 (igual que el admin con fotos)
       String? comprobanteBase64;
       if (comprobante != null) {
         try {
@@ -462,76 +545,90 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
 
       final docRef = await FirebaseFirestore.instance.collection('pedidos').add(pData);
       await prefs.setString('lastOrderId', docRef.id);
-      
+
       final String orderID = docRef.id.length > 4 ? docRef.id.substring(docRef.id.length - 4).toUpperCase() : docRef.id.toUpperCase();
-      String gpsLink = (lat != null && long != null) ? " | Ubicación GPS: https://maps.google.com/?q=$lat,$long" : "";
-      
-      String pagoTxt = metodo == "Efectivo" 
-          ? "Efectivo (Paga con: \$ $pagaCon)" 
-          : "Mercado Pago${comprobanteBase64 != null ? ' ✅ Comprobante subido a la app' : ''}"; 
+      final String mapUrl = (lat != null && long != null)
+          ? "https://www.google.com/maps/search/?api=1&query=$lat,$long"
+          : "https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(finalAddress)}";
 
-      final String ticket = "🍕 *NUEVO PEDIDO - #$orderID* 🍕\nHola Miguel Angel, quiero:\n$detalle⭐ *TOTAL: \$${totalOrder.toStringAsFixed(2)}*\n🏠 *Dirección:* $finalAddress$gpsLink\n💳 *Método:* $pagoTxt\n✅ *Muchas gracias!*";
+      final String pagoLinea = metodo == "Efectivo"
+          ? "EFECTIVO — Paga con: \$$pagaCon"
+          : "TRANSFERENCIA - VERIFICAR EN MP";
 
-      String whatsapp = _preciosConfig?['whatsapp_comprobantes'] ?? "";
-      String finalNumber = whatsapp.replaceAll(RegExp(r'[^0-9]'), '');
-      if (finalNumber.length == 10) finalNumber = "549$finalNumber";
+      final String ticket = "🍕 NUEVO PEDIDO - #$orderID 🍕\n"
+          "👤 Cliente: $userName\n"
+          "🏠 Dirección: $finalAddress\n"
+          "📍 Entrega: ${finalAddress.toLowerCase().contains("retiro") ? "Retiro en local" : "Barrio/Envío"}\n"
+          "📝 DETALLE:\n$detalle"
+          "🚛 ENVÍO: \$${envio.toStringAsFixed(2)}\n"
+          "⭐ TOTAL: \$${totalOrder.toStringAsFixed(2)}\n"
+          "💵 PAGO: $pagoLinea\n\n"
+          "🌍 VER EN MAPA:\n$mapUrl\n\n"
+          "✅ ¡Muchas gracias por elegirnos!";
 
       if (metodo == "Mercado Pago") {
-        Clipboard.setData(const ClipboardData(text: 'gonzalosc22.uala'));
+        final alias = (_preciosConfig?['alias_mp'] ?? '').toString().trim();
+        if (alias.isNotEmpty) await Clipboard.setData(ClipboardData(text: alias));
       }
 
-      bool? isInstalled = await WhatsappShare.isInstalled(package: Package.whatsapp);
-      if (isInstalled != true) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text("❌ WhatsApp no parece estar instalado en este teléfono."),
-            backgroundColor: Colors.red,
-          ));
+      Future<void> enviarSoloTextoWhatsapp() async {
+        final waUri = Uri.parse("whatsapp://send?phone=$finalNumber&text=${Uri.encodeComponent(ticket)}");
+        if (await canLaunchUrl(waUri)) {
+          await launchUrl(waUri, mode: LaunchMode.externalApplication);
+          return;
         }
-        return;
-      }
-
-      // FUNCIÓN DE RESPALDO: Enviar solo texto
-      Future<void> _enviarSoloTexto() async {
-        final url = "whatsapp://send?phone=$finalNumber&text=${Uri.encodeComponent(ticket)}";
-        bool launched = false;
-        if (await canLaunchUrl(Uri.parse(url))) {
-          launched = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        final installed = await WhatsappShare.isInstalled(package: Package.whatsapp);
+        if (installed == true) {
+          await WhatsappShare.share(phone: finalNumber, text: ticket, package: Package.whatsapp);
+          return;
         }
-        if (!launched) {
-          final waUrl = "https://wa.me/$finalNumber?text=${Uri.encodeComponent(ticket)}";
-          await launchUrl(Uri.parse(waUrl), mode: LaunchMode.externalApplication);
-        }
+        await launchUrl(
+          Uri.parse("https://wa.me/$finalNumber?text=${Uri.encodeComponent(ticket)}"),
+          mode: LaunchMode.externalApplication,
+        );
       }
 
       if (comprobante != null) {
+        final File shareReady = await _ensureComprobanteForContentShare(comprobante);
         try {
-          // IMPLEMENTACIÓN OBLIGATORIA: XFILE + SHARE_PLUS (Android 11+)
-          // El archivo ya está en el TemporaryDirectory gracias a la copia previa
-          final XFile xFile = XFile(comprobante.path, mimeType: 'image/jpeg');
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text("🚀 Abriendo WhatsApp para compartir comprobante...",
-                style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
-              backgroundColor: const Color(0xFF25D366),
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
-            ));
+          if (!await shareReady.exists()) {
+            debugPrint("Comprobante no disponible: ${shareReady.path}");
+            await enviarSoloTextoWhatsapp();
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(
+                  "Abriendo WhatsApp con tu pedido y la foto…",
+                  style: GoogleFonts.montserrat(fontWeight: FontWeight.w700, fontSize: 12),
+                ),
+                backgroundColor: const Color(0xFF25D366),
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 2),
+              ));
+            }
+            await Future.delayed(const Duration(milliseconds: 500));
+            if (Platform.isAndroid) {
+              try {
+                const ch = MethodChannel('com.mipedido.pizzeria/whatsapp_direct');
+                await ch.invokeMethod<void>('sendImageToWhatsApp', <String, String>{
+                  'phone': finalNumber,
+                  'filePath': shareReady.path,
+                  'text': ticket,
+                });
+              } on PlatformException catch (e) {
+                debugPrint('whatsapp_direct nativo: ${e.message}');
+                await enviarSoloTextoWhatsapp();
+              }
+            } else {
+              await enviarSoloTextoWhatsapp();
+            }
           }
-
-          // Share.shareXFiles es el método definitivo para evitar errores de permisos
-          await Share.shareXFiles(
-            [xFile],
-            text: ticket,
-          );
-          
         } catch (e) {
-          debugPrint("Error compartiendo con share_plus: $e");
-          await _enviarSoloTexto();
+          debugPrint("Error envío WhatsApp con adjunto: $e");
+          await enviarSoloTextoWhatsapp();
         }
       } else {
-        await _enviarSoloTexto();
+        await enviarSoloTextoWhatsapp();
       }
 
       if (mounted) {
@@ -540,6 +637,11 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
       }
     } catch (e) {
       debugPrint("Error Final: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("No se pudo registrar el pedido: $e"), backgroundColor: Colors.red[800]),
+        );
+      }
     }
   }
 
@@ -606,9 +708,17 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
           floatingActionButton: FloatingActionButton(
             heroTag: "wa_btn",
             onPressed: () async {
-              String w = _preciosConfig?['whatsapp_comprobantes'] ?? '';
-              final url = "https://wa.me/549${w.replaceAll(RegExp(r'[^0-9]'), '')}";
-              if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+              final digits = await _resolveWhatsappComercioDigits();
+              if (!mounted) return;
+              if (digits.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("WhatsApp del comercio no configurado.", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold))),
+                );
+                return;
+              }
+              final url = Uri.parse("https://wa.me/$digits");
+              if (!mounted) return;
+              if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
             },
             backgroundColor: const Color(0xFF25D366),
             child: const Icon(Icons.chat, color: Colors.white),
@@ -739,62 +849,71 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
     final String storeName = _preciosConfig?['nombre'] ?? 'Pizzería Miguel Angel';
     final String slogan = _preciosConfig?['slogan'] ?? (isOpen ? "¡El sabor que esperabas!" : "Cerrado momentáneamente.");
     
-    return Container(
-      padding: const EdgeInsets.only(top: 60, left: 25, right: 25, bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return FutureBuilder<SharedPreferences>(
+      future: SharedPreferences.getInstance(),
+      builder: (context, snapshot) {
+        final String customerName = snapshot.data?.getString('userName') ?? 'Cliente';
+        
+        return Container(
+          padding: const EdgeInsets.only(top: 60, left: 25, right: 25, bottom: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isOpen ? Colors.green : Colors.red,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [BoxShadow(color: (isOpen ? Colors.green : Colors.red).withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))]
-                ),
-                child: Text(
-                  isOpen ? "ABIERTO!" : "CERRADO", 
-                  style: GoogleFonts.montserrat(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1)
-                ),
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.account_circle, size: 30, color: Color(0xFF2D2D2D)),
-                onSelected: (value) async {
-                  if (value == 'perfil') {
-                    Navigator.pushNamed(context, '/perfil');
-                  } else if (value == 'logout') {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: Text("Cerrar Sesión", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
-                        content: Text("¿Estás seguro que querés salir?", style: GoogleFonts.montserrat()),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCELAR")),
-                          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("SALIR", style: TextStyle(color: Colors.red))),
-                        ],
-                      ),
-                    );
-                    if (confirm == true) {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.clear();
-                      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-                    }
-                  }
-                },
-                itemBuilder: (context) => [
-                  PopupMenuItem(value: 'perfil', child: Row(children: [const Icon(Icons.person_outline, size: 18), const SizedBox(width: 10), Text("Mi Cuenta", style: GoogleFonts.montserrat(fontSize: 13))])),
-                  PopupMenuItem(value: 'logout', child: Row(children: [const Icon(Icons.logout, size: 18, color: Colors.redAccent), const SizedBox(width: 10), Text("Cerrar Sesión", style: GoogleFonts.montserrat(fontSize: 13, color: Colors.redAccent, fontWeight: FontWeight.bold))])),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isOpen ? Colors.green : Colors.red,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [BoxShadow(color: (isOpen ? Colors.green : Colors.red).withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))]
+                    ),
+                    child: Text(
+                      isOpen ? "ABIERTO!" : "CERRADO", 
+                      style: GoogleFonts.montserrat(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 1)
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.account_circle, size: 30, color: Color(0xFF2D2D2D)),
+                    onSelected: (value) async {
+                      if (value == 'perfil') {
+                        Navigator.pushNamed(context, '/perfil');
+                      } else if (value == 'logout') {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: Text("Cerrar Sesión", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
+                            content: Text("¿Estás seguro que querés salir?", style: GoogleFonts.montserrat()),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCELAR")),
+                              TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("SALIR", style: TextStyle(color: Colors.red))),
+                            ],
+                          ),
+                        );
+                        if (confirm == true) {
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.clear();
+                          if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                        }
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      PopupMenuItem(value: 'perfil', child: Row(children: [const Icon(Icons.person_outline, size: 18), const SizedBox(width: 10), Text("Mi Cuenta", style: GoogleFonts.montserrat(fontSize: 13))])),
+                      PopupMenuItem(value: 'logout', child: Row(children: [const Icon(Icons.logout, size: 18, color: Colors.redAccent), const SizedBox(width: 10), Text("Cerrar Sesión", style: GoogleFonts.montserrat(fontSize: 13, color: Colors.redAccent, fontWeight: FontWeight.bold))])),
+                    ],
+                  ),
                 ],
               ),
+              const SizedBox(height: 15),
+              Text("¡Hola, $customerName! 👋", style: GoogleFonts.montserrat(fontSize: 14, color: const Color(0xFFFF7F50), fontWeight: FontWeight.bold)),
+              const SizedBox(height: 5),
+              Text(storeName.toUpperCase(), style: GoogleFonts.montserrat(fontSize: 22, fontWeight: FontWeight.w900, color: const Color(0xFF2D2D2D), letterSpacing: 1)),
+              Text(slogan, style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[700], fontWeight: FontWeight.w600)),
             ],
           ),
-          const SizedBox(height: 15),
-          Text(storeName.toUpperCase(), style: GoogleFonts.montserrat(fontSize: 22, fontWeight: FontWeight.w900, color: const Color(0xFF2D2D2D), letterSpacing: 1)),
-          Text(slogan, style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[700], fontWeight: FontWeight.w600)),
-        ],
-      ),
+        );
+      }
     );
   }
 

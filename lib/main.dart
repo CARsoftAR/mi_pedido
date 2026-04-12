@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:pizzeria/configuracion_page.dart';
-import 'package:pizzeria/product_list_screen.dart';
-import 'package:pizzeria/orders_screen.dart';
 import 'package:pizzeria/login_screen.dart';
 import 'package:pizzeria/client_carta_screen.dart';
+import 'package:pizzeria/profile_screen.dart';
+import 'package:pizzeria/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,16 +13,12 @@ void main() async {
   } catch (e) {
     debugPrint("Firebase Error: $e");
   }
-  
-  final prefs = await SharedPreferences.getInstance();
-  final bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-  
-  runApp(MiPedidoApp(isLoggedIn: isLoggedIn));
+
+  runApp(const MiPedidoApp());
 }
 
 class MiPedidoApp extends StatelessWidget {
-  final bool isLoggedIn;
-  const MiPedidoApp({super.key, required this.isLoggedIn});
+  const MiPedidoApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -37,10 +31,11 @@ class MiPedidoApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF9F9F9),
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFFF7F50)),
       ),
-      home: isLoggedIn ? const ClientCartaScreen() : const LoginScreen(),
+      home: const SplashScreen(),
       routes: {
         '/login': (context) => const LoginScreen(),
         '/carta': (context) => const ClientCartaScreen(),
+        '/perfil': (context) => const ProfileScreen(),
       },
     );
   }
