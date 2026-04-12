@@ -35,6 +35,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
   bool _isSaving = false;
   bool _isLoading = true;
   bool _isClosing = false;
+  bool _mostrarEmpanadasMaster = false;
 
   @override
   void initState() {
@@ -78,6 +79,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
           
           _aliasController.text = data['alias_mp'] ?? '';
           _cbuController.text = data['cbu_cvu'] ?? '';
+          _mostrarEmpanadasMaster = data['mostrar_empanadas'] ?? false;
           
           if (data.containsKey('estado_control')) {
             _estadoControl = data['estado_control'] ?? 1;
@@ -161,6 +163,7 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         'cbu_cvu': _cbuController.text.trim(),
         'whatsapp_comprobantes': _whatsappController.text.trim(),
         'estado_control': _estadoControl,
+        'mostrar_empanadas': _mostrarEmpanadasMaster,
         'updated_at': FieldValue.serverTimestamp(),
       };
       
@@ -444,32 +447,53 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
             ]),
             
             const SizedBox(height: 25),
-            
-            _buildSectionTitle("Precios Empanadas Comunes"),
+
+            _buildSectionTitle("Módulo de Empanadas"),
             _buildCard([
-              Row(
-                children: [
-                  Expanded(child: _buildTextField("Unidad \$", _unidadComunController, Icons.attach_money, isNumeric: true)),
-                  const SizedBox(width: 10),
-                  Expanded(child: _buildTextField("Docena \$", _docenaComunController, Icons.shopping_basket, isNumeric: true)),
-                ],
+              SwitchListTile(
+                title: Text("Activar Sección de Empanadas", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: Text("Si se apaga, las empanadas no aparecerán en la carta ni se podrán editar precios.", style: GoogleFonts.montserrat(fontSize: 11)),
+                value: _mostrarEmpanadasMaster,
+                activeColor: const Color(0xFFFF7F50),
+                onChanged: (val) async {
+                  setState(() => _mostrarEmpanadasMaster = val);
+                  // Guardado inmediato para persistencia definitiva
+                  await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set({
+                    'mostrar_empanadas': val,
+                  }, SetOptions(merge: true));
+                },
               ),
             ]),
 
             const SizedBox(height: 25),
             
-            _buildSectionTitle("Precios Empanadas Especiales"),
-            _buildCard([
-              Row(
-                children: [
-                  Expanded(child: _buildTextField("Unidad \$", _unidadEspecialController, Icons.star_outline, isNumeric: true)),
-                  const SizedBox(width: 10),
-                  Expanded(child: _buildTextField("Docena \$", _docenaEspecialController, Icons.grade, isNumeric: true)),
-                ],
-              ),
-            ]),
+            // SECCIONES DE EMPANADAS (DINÁMICAS)
+            if (_mostrarEmpanadasMaster) ...[
+              _buildSectionTitle("Precios Empanadas Comunes"),
+              _buildCard([
+                Row(
+                  children: [
+                    Expanded(child: _buildTextField("Unidad \$", _unidadComunController, Icons.attach_money, isNumeric: true)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildTextField("Docena \$", _docenaComunController, Icons.shopping_basket, isNumeric: true)),
+                  ],
+                ),
+              ]),
 
-            const SizedBox(height: 25),
+              const SizedBox(height: 25),
+              
+              _buildSectionTitle("Precios Empanadas Especiales"),
+              _buildCard([
+                Row(
+                  children: [
+                    Expanded(child: _buildTextField("Unidad \$", _unidadEspecialController, Icons.star_outline, isNumeric: true)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildTextField("Docena \$", _docenaEspecialController, Icons.grade, isNumeric: true)),
+                  ],
+                ),
+              ]),
+              const SizedBox(height: 25),
+            ],
             
             _buildSectionTitle("Cobros (Mercado Pago / Transferencia)"),
             _buildCard([

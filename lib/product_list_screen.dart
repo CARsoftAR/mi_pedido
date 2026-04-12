@@ -478,6 +478,22 @@ class _ProductListScreenState extends State<ProductListScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Variable de control (Solo depende del switch de administración)
+    final bool mostrarEmpanadas = _preciosConfig?['mostrar_empanadas'] ?? false;
+    
+    final List<Map<String, dynamic>> categories = [
+      {'label': 'PROMOS', 'category': 'Oferta'},
+      {'label': 'PIZZAS', 'category': 'Pizza'},
+      if (mostrarEmpanadas) {'label': 'EMPANADAS', 'category': 'Empanada'},
+      {'label': 'BEBIDAS', 'category': 'Bebida'},
+    ];
+
+    // Sincronizar TabController si cambió la cantidad de pestañas
+    if (_tabController.length != categories.length) {
+      _tabController.dispose();
+      _tabController = TabController(length: categories.length, vsync: this);
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF9F9F9),
       appBar: AppBar(
@@ -496,32 +512,19 @@ class _ProductListScreenState extends State<ProductListScreen>
           isScrollable: true,
           indicatorColor: const Color(0xFFFF7F50),
           labelColor: const Color(0xFFFF7F50),
-          tabs: const [
-            Tab(text: "PROMOS"),
-            Tab(text: "PIZZAS"),
-            Tab(text: "EMPANADAS"),
-            Tab(text: "BEBIDAS"),
-          ],
+          tabs: categories.map((c) => Tab(text: c['label'])).toList(),
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          _buildTabContent('Oferta'),
-          _buildTabContent('Pizza'),
-          _buildTabContent('Empanada'),
-          _buildTabContent('Bebida'),
-        ],
+        children: categories.map((c) => _buildTabContent(c['category'])).toList(),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showProductModal(
-          category: [
-            'Oferta',
-            'Pizza',
-            'Empanada',
-            'Bebida',
-          ][_tabController.index],
-        ),
+        onPressed: () {
+          _showProductModal(
+            category: categories[_tabController.index]['category'],
+          );
+        },
         backgroundColor: const Color(0xFFFF7F50),
         child: const Icon(Icons.add, color: Colors.white),
       ),

@@ -733,28 +733,54 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
                   Expanded(
                     child: Container(
                       decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
-                      child: Column(
-                        children: [
-                          TabBar(
-                            controller: _tabController,
-                            isScrollable: true,
-                            indicatorColor: const Color(0xFFFF7F50),
-                            labelColor: const Color(0xFFFF7F50),
-                            labelStyle: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13),
-                            tabs: const [Tab(text: "PROMOS"), Tab(text: "PIZZAS"), Tab(text: "EMPANADAS"), Tab(text: "BEBIDAS")],
-                          ),
-                          Expanded(
-                            child: TabBarView(
-                              controller: _tabController,
-                              children: [
-                                _buildCardList('Oferta', isOpen),
-                                _buildCardList('Pizza', isOpen),
-                                _buildCardList('Empanada', isOpen),
-                                _buildCardList('Bebida', isOpen),
-                              ],
-                            ),
-                          ),
-                        ],
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance.collection('productos').snapshots(),
+                        builder: (context, snapshot) {
+                          bool hasEmpanadas = false;
+                          if (snapshot.hasData) {
+                            hasEmpanadas = snapshot.data!.docs.any((d) => (d.data() as Map<String, dynamic>)['categoria'] == 'Empanada');
+                          }
+                          
+                          // Variable de control (Solo depende del switch de administración)
+                          final bool mostrarEmpanadas = _preciosConfig?['mostrar_empanadas'] ?? false;
+
+                          // Definición dinámica de Pestañas
+                          final List<Map<String, dynamic>> categories = [
+                            {'label': 'PROMOS', 'category': 'Oferta'},
+                            {'label': 'PIZZAS', 'category': 'Pizza'},
+                            if (mostrarEmpanadas) {'label': 'EMPANADAS', 'category': 'Empanada'},
+                            {'label': 'BEBIDAS', 'category': 'Bebida'},
+                          ];
+
+                          // Ajustar TabController si el número de pestañas cambió
+                          // Esto se hace solo si realmente hay un cambio en la longitud detectada
+                          if (_tabController.length != categories.length) {
+                             WidgetsBinding.instance.addPostFrameCallback((_) {
+                               setState(() {
+                                 _tabController = TabController(length: categories.length, vsync: this);
+                               });
+                             });
+                          }
+
+                          return Column(
+                            children: [
+                              TabBar(
+                                controller: _tabController,
+                                isScrollable: true,
+                                indicatorColor: const Color(0xFFFF7F50),
+                                labelColor: const Color(0xFFFF7F50),
+                                labelStyle: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13),
+                                tabs: categories.map((c) => Tab(text: c['label'])).toList(),
+                              ),
+                              Expanded(
+                                child: TabBarView(
+                                  controller: _tabController,
+                                  children: categories.map((c) => _buildCardList(c['category'], isOpen)).toList(),
+                                ),
+                              ),
+                            ],
+                          );
+                        }
                       ),
                     ),
                   ),
