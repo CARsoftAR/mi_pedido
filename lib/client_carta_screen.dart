@@ -1,6 +1,9 @@
 import 'dart:ui';
 import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'main_client.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -545,6 +548,9 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
 
       final docRef = await FirebaseFirestore.instance.collection('pedidos').add(pData);
       await prefs.setString('lastOrderId', docRef.id);
+      await prefs.setString('notifiedStatus', 'Pendiente'); // Resetear estado de notificación
+      _initOrderStatusListener(); // Re-iniciar el listener para el nuevo ID
+
 
       final String orderID = docRef.id.length > 4 ? docRef.id.substring(docRef.id.length - 4).toUpperCase() : docRef.id.toUpperCase();
       final String mapUrl = (lat != null && long != null)
@@ -552,7 +558,7 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
           : "https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(finalAddress)}";
 
       final String pagoLinea = metodo == "Efectivo"
-          ? "EFECTIVO — Paga con: \$$pagaCon"
+          ? "EFECTIVO — Paga con: ${_formatMoney(pagaCon)}"
           : "TRANSFERENCIA - VERIFICAR EN MP";
 
       final String ticket = "🍕 NUEVO PEDIDO - #$orderID 🍕\n"
@@ -560,8 +566,8 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
           "🏠 Dirección: $finalAddress\n"
           "📍 Entrega: ${finalAddress.toLowerCase().contains("retiro") ? "Retiro en local" : "Barrio/Envío"}\n"
           "📝 DETALLE:\n$detalle"
-          "🚛 ENVÍO: \$${envio.toStringAsFixed(2)}\n"
-          "⭐ TOTAL: \$${totalOrder.toStringAsFixed(2)}\n"
+          "🚛 ENVÍO: ${_formatMoney(envio)}\n"
+          "⭐ TOTAL: ${_formatMoney(totalOrder)}\n"
           "💵 PAGO: $pagoLinea\n\n"
           "🌍 VER EN MAPA:\n$mapUrl\n\n"
           "✅ ¡Muchas gracias por elegirnos!";
@@ -646,32 +652,92 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
   }
 
 
+  StreamSubscription? _orderSubscription;
+
+
   void _initOrderStatusListener() async {
     final prefs = await SharedPreferences.getInstance();
     final String? lastOrderId = prefs.getString('lastOrderId');
     if (lastOrderId == null) return;
 
-    FirebaseFirestore.instance.collection('pedidos').doc(lastOrderId).snapshots().listen((snapshot) async {
+    // Cancelar suscripción previa si existe
+    await _orderSubscription?.cancel();
+
+    _orderSubscription = FirebaseFirestore.instance.collection('pedidos').doc(lastOrderId).snapshots(includeMetadataChanges: true).listen((snapshot) async {
       if (!snapshot.exists) return;
       final data = snapshot.data() as Map<String, dynamic>;
       final String newStatus = data['estado'] ?? 'Pendiente';
       final String lastNotified = prefs.getString('notifiedStatus') ?? 'Pendiente';
       
+      // Si el estado es rechazado, lo notificamos SIEMPRE si no ha sido notificado aún
       if (newStatus != lastNotified) {
         await prefs.setString('notifiedStatus', newStatus);
-        if (newStatus == 'Cancelado' && mounted) _showRejectionAlert(data['motivo_rechazo'] ?? 'Sin motivo especificado');
+        
+        if ((newStatus == 'rechazado' || newStatus == 'Cancelado') && mounted) {
+          final motive = data['motivo_rechazo'] ?? data['motivo'] ?? 'Sin motivo especificado';
+          _showRejectionAlert(motive);
+          _sendLocalNotification("Pedido Rechazado ❌", "Motivo: $motive");
+        } else if (newStatus == 'En Preparación') {
+          _sendLocalNotification("¡Pedido Aceptado! 🍕", "Ya estamos cocinando tu pedido.");
+        } else if (newStatus == 'Despachado') {
+          _sendLocalNotification("¡Pedido en Camino! 🛵", "Prepará la mesa, el repartidor está cerca.");
+        }
       }
     });
+  }
+
+  Future<void> _sendLocalNotification(String title, String body) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'order_updates', 'Actualizaciones de Pedidos',
+      importance: Importance.max,
+      priority: Priority.high,
+      showWhen: true,
+    );
+    const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+    await localNotifications.show(
+      DateTime.now().millisecond % 10000,
+      title,
+      body,
+      platformChannelSpecifics,
+    );
+  }
+
+  @override
+  void dispose() {
+    _orderSubscription?.cancel();
+    super.dispose();
   }
 
   void _showRejectionAlert(String motivo) {
     showDialog(
       context: context,
+      barrierDismissible: false, // Forzar a que lo lean
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text("❌ Pedido Rechazado", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold)),
-        content: Text("Motivo: $motivo"),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("ENTENDIDO"))],
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(25), 
+          side: const BorderSide(color: Colors.redAccent, width: 2)
+        ),
+        title: Text("❌ PEDIDO RECHAZADO", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, color: Colors.redAccent)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("Lo sentimos, tu pedido fue rechazado por el local.", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 15),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(15)),
+              child: Text("MOTIVO: $motivo", style: GoogleFonts.montserrat(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context), 
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: Text("ENTENDIDO", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, color: Colors.white))
+          )
+        ],
       ),
     );
   }
@@ -694,8 +760,8 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      // FUENTE ÚNICA DE VERDAD: el documento que el admin SIEMPRE escribe
-      stream: FirebaseFirestore.instance.collection('configuracion_local').doc('precios').snapshots(),
+      // NUEVA FUENTE DE VERDAD: Colección config
+      stream: FirebaseFirestore.instance.collection('config').doc('datos_local').snapshots(),
       builder: (context, configSnapshot) {
         if (!configSnapshot.hasData) return const Center(child: CircularProgressIndicator());
         
@@ -816,7 +882,13 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
             final data = snapshot.data!.data() as Map<String, dynamic>;
             final String status = data['estado'] ?? '';
             
-            if (status == 'Finalizado' || status == '' || status == 'modificando' || status == 'Cancelado') return const SizedBox.shrink();
+            // Solo mostramos si el estado es uno de los activos (procesando)
+            final List<String> estadosActivos = [
+              'Pendiente', 'Confirmado', 'En Preparación', 
+              'listo_para_despacho', 'Despachado', 'en_camino'
+            ];
+            
+            if (!estadosActivos.contains(status)) return const SizedBox.shrink();
 
             String title = "Seguí tu pedido";
             String sub = "Tocá para ver detalles";

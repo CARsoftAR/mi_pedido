@@ -16,8 +16,9 @@ Pedio desglosado con su importe
 
 
 4- Una vez el pedido llaga al Comercio, se puede modifica hasta los 5 minutos después de enviar el pedido, el tiempo de los 5 minutos se puede modificar desde la apps Comercio, el dueño del negocio pone el limite de tiempo
-
-5- Agrregar el horario de apertura y cierre
+   ( En desglosado )
+5- Agrregar el horario de apertura y cierrera cuando cancelo el pedido de
+   ( Ya esta implementado )
 
 Alias Mercado Pago: bonzalosc22.uala
 Celular: 2994086946

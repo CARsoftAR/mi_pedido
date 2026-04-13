@@ -50,11 +50,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     final String? lastOrderId = prefs.getString('lastOrderId');
     if (lastOrderId != null) {
       try {
-        final doc = await FirebaseFirestore.instance.collection('pedidos').doc(lastOrderId).get();
+        final doc = await FirebaseFirestore.instance.collection('pedidos').doc(lastOrderId).get(const GetOptions(source: Source.serverAndCache));
         if (doc.exists) {
           final String estado = doc.data()?['estado'] ?? '';
-          // ESTADOS ACTIVOS: Pendiente, modificando, En Preparación, Despachado
-          if (estado == 'Pendiente' || estado == 'modificando' || estado == 'En Preparación' || estado == 'Despachado') {
+          // ESTADOS ACTIVOS Y FINALES RECIENTES: Aseguramos que el cliente vea el resultado
+          if (estado == 'Pendiente' || estado == 'modificando' || estado == 'En Preparación' || 
+              estado == 'listo_para_despacho' || estado == 'Despachado' || 
+              estado == 'rechazado' || estado == 'Cancelado') {
              if (mounted) {
                Navigator.of(context).pushReplacement(
                  MaterialPageRoute(builder: (context) => OrderStatusScreen(orderId: lastOrderId))

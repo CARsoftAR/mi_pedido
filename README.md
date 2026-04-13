@@ -17,4 +17,11 @@ For help getting started with Flutter development, view the
 samples, guidance on mobile development, and a full API reference.
 
 
-cuando hagas algun cambio en el codigo y termines, siempre compila la apk en la carpeta "C:\Apps\mi_pedido\RELEASES"
+## REGLAS DE DESARROLLO Y COMPILACIÓN
+1. **Compilación de APKs:** Siempre que se terminen cambios, se DEBEN compilar las APKs en la carpeta `C:\Apps\mi_pedido\RELEASES`.
+2. **Nombres de Archivos:**
+   - Admin: `MIGUEL_ANGEL_ADMIN.apk`
+   - Cliente: `MIGUEL_ANGEL_CLIENTE.apk`
+3. **Flavors:**
+   - Admin: `flutter build apk --flavor admin -t lib/main_admin.dart`
+   - Cliente: `flutter build apk --flavor cliente -t lib/main_client.dart`

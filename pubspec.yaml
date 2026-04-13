@@ -49,6 +49,7 @@ dependencies:
   path_provider: ^2.1.5
   whatsapp_share2: ^2.0.2
   flutter_image_compress: ^2.3.0
+  flutter_local_notifications: ^17.0.0
 
 dev_dependencies:
   flutter_test:

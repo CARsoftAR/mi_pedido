@@ -17,10 +17,12 @@ class OrdersScreen extends StatefulWidget {
 class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final Set<String> _processedOrders = {}; 
+  bool _remoteAlarmEnabled = true;
+  double _remoteVolume = 1.0;
+  bool _remoteLoop = false;
+  String _currentTono = 'Corto';
+  String? _selectedUri;
   bool _isShowingDialog = false;
-  String _alertType = 'notification'; 
-  String? _selectedRingtoneUri;
-  String? _selectedRingtoneTitle;
   final AudioPlayer _audioPlayerInstance = AudioPlayer();
   static const _channel = MethodChannel('com.mipedido.pizzeria/sounds');
 
@@ -32,25 +34,34 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
     _initOrderListener();
   }
 
-  Future<void> _loadAlertPreference() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _alertType = prefs.getString('alert_type') ?? 'notification';
-      _selectedRingtoneUri = prefs.getString('ringtone_uri');
-      _selectedRingtoneTitle = prefs.getString('ringtone_title');
-    });
-  }
+  bool _isFirstLoad = true;
 
-  Future<void> _saveAlertPreference(String type, {String? uri, String? title}) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('alert_type', type);
-    if (uri != null) await prefs.setString('ringtone_uri', uri);
-    if (title != null) await prefs.setString('ringtone_title', title);
-    
-    setState(() {
-      _alertType = type;
-      if (uri != null) _selectedRingtoneUri = uri;
-      if (title != null) _selectedRingtoneTitle = title;
+  Future<void> _loadAlertPreference() async {
+    // Vincular con Alarma Remota (Firebase)
+    FirebaseFirestore.instance.collection('config').doc('alarma').snapshots().listen((snap) {
+      if (snap.exists) {
+        if (mounted) {
+          final data = snap.data() as Map<String, dynamic>;
+          setState(() {
+            _remoteAlarmEnabled = data['enabled'] ?? true;
+            _remoteVolume = (data['volume'] ?? 1.0).toDouble();
+            _remoteLoop = data['loop'] ?? false;
+            _currentTono = data['tono'] ?? 'Corto';
+            _selectedUri = data['uri'];
+          });
+          debugPrint("Configuración de Alarma Cargada: URI=$_selectedUri, Vol=$_remoteVolume");
+        }
+      } else {
+        // CREAR SI NO EXISTE
+        FirebaseFirestore.instance.collection('config').doc('alarma').set({
+          'enabled': true,
+          'tono': 'Corto',
+          'uri': null, // Se configurará luego
+          'volume': 1.0,
+          'loop': false,
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
     });
   }
 
@@ -60,10 +71,22 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
         .where('estado', isEqualTo: 'Pendiente')
         .snapshots()
         .listen((snapshot) {
-          if (snapshot.docs.isNotEmpty) {
+          if (_isFirstLoad) {
+            // En la primera carga, solo marcamos los existentes como procesados
             for (var doc in snapshot.docs) {
+              _processedOrders.add(doc.id);
+            }
+            _isFirstLoad = false;
+            debugPrint("Carga inicial de pedidos completada: ${_processedOrders.length} pre-existentes.");
+            return;
+          }
+
+          for (var change in snapshot.docChanges) {
+            if (change.type == DocumentChangeType.added) {
+              final doc = change.doc;
               if (!_processedOrders.contains(doc.id)) {
                 _processedOrders.add(doc.id);
+                debugPrint("¡NUEVO PEDIDO DETECTADO! ID: ${doc.id}");
                 if (!_isShowingDialog) {
                   _playNotificationSound();
                   _showNewOrderDialog(doc);
@@ -74,20 +97,49 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
         });
   }
 
-  Future<void> _playNotificationSound() async {
-    if (_alertType == 'silent') return;
+  Future<void> _playNotificationSound({bool force = false}) async {
+    if (!force && (!_remoteAlarmEnabled)) return;
+    
     try {
-      if (_alertType == 'custom' && _selectedRingtoneUri != null) {
-        await _channel.invokeMethod('playCustomRingtone', {'uri': _selectedRingtoneUri});
-      } else if (_alertType == 'alarm') {
-        FlutterRingtonePlayer().playAlarm();
-      } else if (_alertType == 'ringtone') {
-        FlutterRingtonePlayer().playRingtone();
+      debugPrint("Intentando reproducir alarma: URI=$_selectedUri, Tono=$_currentTono");
+      
+      // Detener cualquier sonido previo
+      FlutterRingtonePlayer().stop();
+      await _channel.invokeMethod('stopAllSounds');
+
+      if (_selectedUri != null && _selectedUri!.isNotEmpty) {
+        // REPRODUCCIÓN POR URI (Elegido por el usuario en el cel)
+        final bool success = await _channel.invokeMethod('playCustomRingtone', {
+          'uri': _selectedUri,
+          'volume': _remoteVolume,
+          'loop': _remoteLoop,
+        });
+        debugPrint("Resultado playCustomRingtone: $success");
       } else {
-        FlutterRingtonePlayer().playNotification();
+        // Fallback a sonidos predefinidos si no hay URI (Compatibilidad)
+        debugPrint("No hay URI específica, usando fallback de tono: $_currentTono");
+        if (_currentTono == 'Sirena') {
+          FlutterRingtonePlayer().playAlarm();
+        } else if (_currentTono == 'Campana') {
+          FlutterRingtonePlayer().playRingtone();
+        } else {
+          // Si es 'Corto' o cualquier otro, usamos Notification (que suele ser el 'BUBBLE')
+          // Lo cambiamos a playAlarm() si queremos que sea más ruidoso
+          FlutterRingtonePlayer().playNotification();
+        }
+      }
+      
+      // Lógica de Repetición (Loop)
+      if (_remoteLoop) {
+        Future.delayed(const Duration(seconds: 4), () {
+          if (_isShowingDialog && _remoteLoop && mounted) {
+            debugPrint("Re-disparando alarma (Loop activo)...");
+            _playNotificationSound(force: true);
+          }
+        });
       }
     } catch (e) {
-      debugPrint("Error playing sound: $e");
+      debugPrint("Error al reproducir sonido de notificación: $e");
     }
   }
 
@@ -141,7 +193,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text("TOTAL:", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 18)),
-                      Text("\$${data['total']}", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 24, color: const Color(0xFFFF7F50))),
+                      Text(_formatMoney(data['total']), style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 24, color: const Color(0xFFFF7F50))),
                     ],
                   ),
                   const SizedBox(height: 25),
@@ -186,13 +238,29 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_active, color: Color(0xFFFF7F50)),
-            onPressed: () {
-              // Menú simplificado por ahora
-               _playNotificationSound();
-               Future.delayed(const Duration(seconds: 2), () => _stopAllSounds());
-            },
+          StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance.collection('config').doc('alarma').snapshots(),
+            builder: (context, snapshot) {
+              final bool isEnabled = (snapshot.data?.data() as Map?)?['enabled'] ?? true;
+              return IconButton(
+                icon: Icon(
+                  isEnabled ? Icons.notifications_active : Icons.notifications_off, 
+                  color: isEnabled ? const Color(0xFFFF7F50) : Colors.grey
+                ),
+                onPressed: () async {
+                  bool newEnabled = !isEnabled;
+                  await FirebaseFirestore.instance.collection('config').doc('alarma').set({
+                    'enabled': newEnabled,
+                    'updated_at': FieldValue.serverTimestamp(),
+                  }, SetOptions(merge: true));
+                  
+                  if (newEnabled) {
+                    _playNotificationSound(force: true);
+                    Future.delayed(const Duration(seconds: 2), () => _stopAllSounds());
+                  }
+                },
+              );
+            }
           ),
         ],
         bottom: TabBar(
@@ -337,7 +405,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                                     double total = (data['total'] is num) ? data['total'].toDouble() : 0.0;
                                     double cambio = pagaCon - total;
                                     return Text(
-                                      "💵 Paga con: \$${pagaCon.toStringAsFixed(0)} | Cambio: \$${cambio > 0 ? cambio.toStringAsFixed(0) : '0'}",
+                                      "💵 Paga con: ${_formatMoney(pagaCon)} | Cambio: ${_formatMoney(cambio > 0 ? cambio : 0.0)}",
                                       style: GoogleFonts.montserrat(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.black87)
                                     );
                                   }),
@@ -521,7 +589,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
 
     if (reason != null && reason.isNotEmpty) {
       FirebaseFirestore.instance.collection('pedidos').doc(id).update({
-        'estado': 'Cancelado',
+        'estado': 'rechazado',
         'motivo_rechazo': reason,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -550,5 +618,10 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
       label: const Text("VER MAPA"),
       style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[700], foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
     );
+  }
+  String _formatMoney(dynamic value) {
+    if (value == null) return "\$0,00";
+    double price = (value is num) ? value.toDouble() : (double.tryParse(value.toString().replaceAll(',', '.')) ?? 0.0);
+    return "\$${price.toStringAsFixed(2).replaceAll('.', ',')}";
   }
 }

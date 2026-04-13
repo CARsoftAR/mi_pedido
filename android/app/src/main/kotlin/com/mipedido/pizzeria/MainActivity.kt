@@ -19,17 +19,64 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.mipedido.pizzeria/sounds")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "getRingtones" -> {
+                        val ringtones = mutableListOf<Map<String, String>>()
+                        val manager = RingtoneManager(applicationContext)
+                        // Incluir TODO: Notificaciones, Ringtones y Alarmas
+                        manager.setType(RingtoneManager.TYPE_ALL)
+                        val cursor = manager.cursor
+                        while (cursor.moveToNext()) {
+                            val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX)
+                            val uri = manager.getRingtoneUri(cursor.position).toString()
+                            ringtones.add(mapOf("title" to title, "uri" to uri))
+                        }
+                        result.success(ringtones)
+                    }
                     "playCustomRingtone" -> {
                         val uriStr = call.argument<String>("uri")
+                        val volume = call.argument<Double>("volume") ?: 1.0
                         if (uriStr != null) {
                             try {
                                 currentRingtone?.stop()
                                 val uri = Uri.parse(uriStr)
-                                currentRingtone = RingtoneManager.getRingtone(applicationContext, uri)
-                                currentRingtone?.play()
-                                result.success(true)
+                                
+                                // Intentar obtener el ringtone
+                                val ringtone = RingtoneManager.getRingtone(applicationContext, uri)
+                                
+                                if (ringtone != null) {
+                                    // Configurar atributos de audio para que suene como ALARMA (prioridad alta)
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                                        val aa = android.media.AudioAttributes.Builder()
+                                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                            .build()
+                                        ringtone.audioAttributes = aa
+                                    } else {
+                                        @Suppress("DEPRECATION")
+                                        ringtone.streamType = android.media.AudioManager.STREAM_ALARM
+                                    }
+
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                                        ringtone.volume = volume.toFloat()
+                                    }
+                                    
+                                    currentRingtone = ringtone
+                                    currentRingtone?.play()
+                                    result.success(true)
+                                } else {
+                                    // Fallback manual si getRingtone devuelve null
+                                    throw Exception("Ringtone is null")
+                                }
                             } catch (e: Exception) {
-                                result.error("SOUND_ERROR", e.message, null)
+                                // Fallback al default de ALARMA si falla el URI específico
+                                try {
+                                    val defaultUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                                    currentRingtone = RingtoneManager.getRingtone(applicationContext, defaultUri)
+                                    currentRingtone?.play()
+                                    result.error("SOUND_ERROR", "Playing default instead of $uriStr: ${e.message}", null)
+                                } catch (e2: Exception) {
+                                    result.error("CORE_ERROR", e2.message, null)
+                                }
                             }
                         } else {
                             result.error("MISSING_ARG", "URI is null", null)

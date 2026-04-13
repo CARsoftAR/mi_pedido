@@ -501,7 +501,7 @@ class _CartSummaryScreenState extends State<CartSummaryScreen> {
               ),
             ),
             if (cost > 0)
-              Text("+\$${cost.toInt()}", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.blueGrey[800])),
+                  Text("+${_formatMoney(cost)}", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.blueGrey[800])),
             const SizedBox(width: 5),
             Icon(isSelected ? Icons.radio_button_checked : Icons.radio_button_off, color: isSelected ? const Color(0xFFFF7F50) : Colors.grey[300], size: 20),
           ],

@@ -1,13 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'splash_screen.dart'; // IMPORT DEL SPLASH
 import 'login_screen.dart';
 import 'client_carta_screen.dart';
 import 'profile_screen.dart';
 
+final localNotifications = FlutterLocalNotificationsPlugin();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  const initializationSettings = InitializationSettings(
+    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+  );
+
+  await localNotifications.initialize(initializationSettings);
+
   try {
     await Firebase.initializeApp();
   } catch (e) {

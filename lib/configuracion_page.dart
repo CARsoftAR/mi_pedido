@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 
 class ConfiguracionPage extends StatefulWidget {
   const ConfiguracionPage({super.key});
@@ -36,11 +38,31 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
   bool _isLoading = true;
   bool _isClosing = false;
   bool _mostrarEmpanadasMaster = false;
+  
+  // VARIABLES DE ALARMA (Nuevas, desde cero)
+  bool _alarmaEnabled = true;
+  String _alarmaTono = 'Corto'; // Sirena, Campana, Corto
+  String? _alarmaUri; // URI del tono elegido
+  double _alarmaVolumen = 100.0;
+  bool _alarmaLoop = false;
+  List<dynamic> _systemRingtones = [];
+  
+  static const _channel = MethodChannel('com.mipedido.pizzeria/sounds');
 
   @override
   void initState() {
     super.initState();
     _cargarConfiguracion();
+    _fetchRingtones();
+  }
+
+  void _fetchRingtones() async {
+    try {
+      final List<dynamic> res = await _channel.invokeMethod('getRingtones');
+      setState(() => _systemRingtones = res);
+    } catch (e) {
+      debugPrint("Error fetching ringtones: $e");
+    }
   }
 
   String _formatPrice(dynamic value) {
@@ -59,55 +81,93 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
 
   void _cargarConfiguracion() async {
     try {
-      final doc = await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').get();
-      if (doc.exists) {
-        final data = doc.data()!;
+      // Intentar cargar desde la nueva colección config
+      final localDoc = await FirebaseFirestore.instance.collection('config').doc('datos_local').get();
+      final mpDoc = await FirebaseFirestore.instance.collection('config').doc('mercado_pago').get();
+
+      if (localDoc.exists) {
+        // USO DE LA NUEVA DATA (Ya migrada)
+        final data = localDoc.data()!;
+        final mpData = mpDoc.data() ?? {};
         setState(() {
           _nombreController.text = data['nombre'] ?? 'Pizzería Miguel Angel';
-          _sloganController.text = data['slogan'] ?? '¡Pizzas con Amor!';
+          _sloganController.text = data['slogan'] ?? '¡Pizzería Gourmet!';
           _direccionController.text = data['direccion'] ?? '';
           _horarioController.text = data['horario'] ?? '';
           _demoraController.text = data['tiempo_demora'] ?? '';
-          _deliveryController.text = _formatPrice(data['precio_delivery']);
+          _deliveryController.text = _formatPrice(data['precio_delivery'] ?? 0);
           _envioBarrioController.text = _formatPrice(data['v_envio_barrio'] ?? 0);
           _envioRetiroController.text = _formatPrice(data['v_envio_retiro'] ?? 0);
-          
-          _unidadComunController.text = _formatPrice(data['unidad_comun']);
-          _docenaComunController.text = _formatPrice(data['docena_comun']);
-          _unidadEspecialController.text = _formatPrice(data['unidad_especial']);
-          _docenaEspecialController.text = _formatPrice(data['docena_especial']);
-          
-          _aliasController.text = data['alias_mp'] ?? '';
-          _cbuController.text = data['cbu_cvu'] ?? '';
+          _unidadComunController.text = _formatPrice(data['unidad_comun'] ?? 0);
+          _docenaComunController.text = _formatPrice(data['docena_comun'] ?? 0);
+          _unidadEspecialController.text = _formatPrice(data['unidad_especial'] ?? 0);
+          _docenaEspecialController.text = _formatPrice(data['docena_especial'] ?? 0);
+          _estadoControl = data['estado_control'] ?? 1;
           _mostrarEmpanadasMaster = data['mostrar_empanadas'] ?? false;
-          
-          if (data.containsKey('estado_control')) {
-            _estadoControl = data['estado_control'] ?? 1;
-          } else {
-            // Migración: si existe el campo viejo, lo mapeamos
-            bool viejo = data['local_abierto_manual'] ?? true;
-            _estadoControl = viejo ? 1 : 0;
-          }
+          _aliasController.text = mpData['alias_mp'] ?? '';
+          _cbuController.text = mpData['cbu_cvu'] ?? '';
+          _whatsappController.text = mpData['whatsapp_comprobantes'] ?? '';
+        });
+      } else {
+        // FALLBACK: Intentar leer de la colección vieja por si aún no se migró
+        final oldDoc = await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').get();
+        if (oldDoc.exists) {
+           final oldData = oldDoc.data()!;
+           setState(() {
+              _nombreController.text = oldData['nombre'] ?? 'Pizzería Miguel Angel';
+              _sloganController.text = oldData['slogan'] ?? '¡Pizzería Gourmet!';
+              _direccionController.text = oldData['direccion'] ?? '';
+              _horarioController.text = oldData['horario'] ?? '';
+              _demoraController.text = oldData['tiempo_demora'] ?? '';
+              _deliveryController.text = _formatPrice(oldData['precio_delivery'] ?? 0);
+              _envioBarrioController.text = _formatPrice(oldData['v_envio_barrio'] ?? 0);
+              _envioRetiroController.text = _formatPrice(oldData['v_envio_retiro'] ?? 0);
+              _unidadComunController.text = _formatPrice(oldData['unidad_comun'] ?? 0);
+              _docenaComunController.text = _formatPrice(oldData['docena_comun'] ?? 0);
+              _unidadEspecialController.text = _formatPrice(oldData['unidad_especial'] ?? 0);
+              _docenaEspecialController.text = _formatPrice(oldData['docena_especial'] ?? 0);
+              _estadoControl = oldData['estado_control'] ?? 1;
+              _mostrarEmpanadasMaster = oldData['mostrar_empanadas'] ?? false;
+              _aliasController.text = oldData['alias_mp'] ?? '';
+              _cbuController.text = oldData['cbu_cvu'] ?? '';
+              _whatsappController.text = oldData['whatsapp_comprobantes'] ?? '';
+           });
+           // Migrar silenciosamente para la próxima vez
+           _guardarConfiguracion(); 
+        } else {
+           // Inicializar con vacíos si de verdad no hay nada en ningún lado
+           await FirebaseFirestore.instance.collection('config').doc('datos_local').set({
+             'nombre': 'Pizzería Miguel Angel',
+             'slogan': '¡Pizzería Gourmet!',
+             'estado_control': 1,
+             'updated_at': FieldValue.serverTimestamp(),
+           });
+        }
+      }
+
+      // 4. CARGAR ALARMA (Nuevas, desde cero)
+      final alarmaDoc = await FirebaseFirestore.instance.collection('config').doc('alarma').get();
+      if (alarmaDoc.exists) {
+        final aData = alarmaDoc.data()!;
+        setState(() {
+          _alarmaEnabled = aData['enabled'] ?? true;
+          _alarmaTono = aData['tono'] ?? 'Corto';
+          _alarmaUri = aData['uri']; // Recuperamos el URI específico
+          _alarmaVolumen = (aData['volume'] ?? 1.0) * 100.0;
+          _alarmaLoop = aData['loop'] ?? false;
+        });
+      } else {
+        await FirebaseFirestore.instance.collection('config').doc('alarma').set({
+          'enabled': true,
+          'tono': 'Corto',
+          'volume': 1.0,
+          'loop': false,
+          'updated_at': FieldValue.serverTimestamp(),
         });
       }
 
-      // Cargar WhatsApp desde configuracion_negocio
-      final negocioDoc = await FirebaseFirestore.instance.collection('configuracion_negocio').doc('contacto').get();
-      if (negocioDoc.exists) {
-        setState(() {
-          _whatsappController.text = negocioDoc.data()?['whatsapp_comprobantes'] ?? '';
-        });
-      }
-
-      // Cargar tiempo de edición desde config/tiempos
-      final tiemposDoc = await FirebaseFirestore.instance.collection('config').doc('tiempos').get();
-      if (tiemposDoc.exists) {
-        setState(() {
-          _minutosEdicionController.text = (tiemposDoc.data()?['minutos_edicion'] ?? 5).toString();
-        });
-      }
     } catch (e) {
-      debugPrint("Error al cargar configuración: $e");
+      debugPrint("Error al recuperar configuración: $e");
     } finally {
       setState(() => _isLoading = false);
     }
@@ -146,13 +206,51 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
   void _guardarConfiguracion() async {
     setState(() => _isSaving = true);
     try {
-      final Map<String, dynamic> data = {
+      // 1. GUARDAR DATOS DEL LOCAL
+      await FirebaseFirestore.instance.collection('config').doc('datos_local').set({
         'nombre': _nombreController.text.trim(),
         'slogan': _sloganController.text.trim(),
         'direccion': _direccionController.text.trim(),
         'horario': _horarioController.text.trim(),
         'tiempo_demora': _demoraController.text.trim(),
-        'precio_delivery': _parsePrice(_deliveryController.text), // Villa
+        'precio_delivery': _parsePrice(_deliveryController.text),
+        'v_envio_barrio': _parsePrice(_envioBarrioController.text),
+        'v_envio_retiro': _parsePrice(_envioRetiroController.text),
+        'unidad_comun': _parsePrice(_unidadComunController.text),
+        'docena_comun': _parsePrice(_docenaComunController.text),
+        'unidad_especial': _parsePrice(_unidadEspecialController.text),
+        'docena_especial': _parsePrice(_docenaEspecialController.text),
+        'estado_control': _estadoControl,
+        'mostrar_empanadas': _mostrarEmpanadasMaster,
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 2. GUARDAR MERCADO PAGO (SIN CAMBIOS)
+      await FirebaseFirestore.instance.collection('config').doc('mercado_pago').set({
+        'alias_mp': _aliasController.text.trim(),
+        'cbu_cvu': _cbuController.text.trim(),
+        'whatsapp_comprobantes': _whatsappController.text.trim(),
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 3. GUARDAR ALARMA (NUEVOS AJUSTES CON URI)
+      await FirebaseFirestore.instance.collection('config').doc('alarma').set({
+        'enabled': _alarmaEnabled,
+        'tono': _alarmaTono,
+        'uri': _alarmaUri,
+        'volume': _alarmaVolumen / 100.0,
+        'loop': _alarmaLoop,
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 4. ESPEJAR EN CONFIGURACION_LOCAL PARA COMPATIBILIDAD CON APP CLIENTE
+      await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set({
+        'nombre': _nombreController.text.trim(),
+        'slogan': _sloganController.text.trim(),
+        'direccion': _direccionController.text.trim(),
+        'horario': _horarioController.text.trim(),
+        'tiempo_demora': _demoraController.text.trim(),
+        'precio_delivery': _parsePrice(_deliveryController.text),
         'v_envio_barrio': _parsePrice(_envioBarrioController.text),
         'v_envio_retiro': _parsePrice(_envioRetiroController.text),
         'unidad_comun': _parsePrice(_unidadComunController.text),
@@ -160,33 +258,14 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         'unidad_especial': _parsePrice(_unidadEspecialController.text),
         'docena_especial': _parsePrice(_docenaEspecialController.text),
         'alias_mp': _aliasController.text.trim(),
-        'cbu_cvu': _cbuController.text.trim(),
         'whatsapp_comprobantes': _whatsappController.text.trim(),
-        'estado_control': _estadoControl,
         'mostrar_empanadas': _mostrarEmpanadasMaster,
-        'updated_at': FieldValue.serverTimestamp(),
-      };
-      
-      // GUARDAR EN AMBOS LUGARES PARA COMPATIBILIDAD (Seguridad Gonzalo)
-      await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set(data, SetOptions(merge: true));
-      
-      // ACTUALIZAR ESTADO DINÁMICO PARA EL CLIENTE (configuracion/local -> estaAbierto)
-      await FirebaseFirestore.instance.collection('configuracion').doc('local').set({
-        'estaAbierto': _checkStatus(),
-        'nombre': _nombreController.text.trim(),
-        'slogan': _sloganController.text.trim(),
-        'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      
-      // Guardar WhatsApp en configuracion_negocio (Respaldo/Compatibilidad)
-      await FirebaseFirestore.instance.collection('configuracion_negocio').doc('contacto').set({
-        'whatsapp_comprobantes': _whatsappController.text.trim(),
-        'updated_at': FieldValue.serverTimestamp(),
+        'estado_control': _estadoControl,
       }, SetOptions(merge: true));
 
-      // Guardar tiempo de edición en config/tiempos
-      await FirebaseFirestore.instance.collection('config').doc('tiempos').set({
-        'minutos_edicion': int.tryParse(_minutosEdicionController.text) ?? 5,
+      // 4. ACTUALIZAR ESTADO DINÁMICO (estaAbierto)
+      await FirebaseFirestore.instance.collection('configuracion').doc('local').set({
+        'estaAbierto': _checkStatus(),
         'updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -269,6 +348,14 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.blue),
+            onPressed: () async {
+              await FirebaseFirestore.instance.clearPersistence();
+              _cargarConfiguracion();
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Caché limpiada y datos recargados')));
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.red),
             onPressed: () async {
@@ -494,6 +581,98 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
               ]),
               const SizedBox(height: 25),
             ],
+            
+            _buildSectionTitle("Alertas de Nuevos Pedidos (Alarma)"),
+            _buildCard([
+              SwitchListTile(
+                title: Text("Estado Maestro de Alarma", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: Text("Activa o desactiva todas las notificaciones sonoras", style: GoogleFonts.montserrat(fontSize: 11)),
+                value: _alarmaEnabled,
+                activeColor: const Color(0xFFFF7F50),
+                onChanged: (val) => setState(() => _alarmaEnabled = val),
+              ),
+              const Divider(),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Selector de Sonido (Tonos del Celular)", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    DropdownButton<String>(
+                      value: _systemRingtones.any((r) => r['uri'] == _alarmaUri) ? _alarmaUri : null,
+                      isExpanded: true,
+                      hint: Text("Elegí un sonido del sistema", style: GoogleFonts.montserrat(fontSize: 12)),
+                      items: _systemRingtones.map((r) => DropdownMenuItem(
+                        value: r['uri'] as String, 
+                        child: Text(r['title'] ?? 'Tono', style: GoogleFonts.montserrat(fontSize: 12))
+                      )).toList(),
+                      onChanged: (val) {
+                        final res = _systemRingtones.firstWhere((r) => r['uri'] == val);
+                        setState(() {
+                          _alarmaUri = val;
+                          _alarmaTono = res['title'] ?? 'Sistema';
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text("Volumen de Alerta: ${_alarmaVolumen.round()}%", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
+                        Icon(_alarmaVolumen > 50 ? Icons.volume_up : Icons.volume_down, size: 18, color: Colors.grey),
+                      ],
+                    ),
+                    Slider(
+                      value: _alarmaVolumen,
+                      min: 0,
+                      max: 100,
+                      divisions: 10,
+                      activeColor: const Color(0xFFFF7F50),
+                      onChanged: (val) => setState(() => _alarmaVolumen = val),
+                    ),
+                  ],
+                ),
+              ),
+              SwitchListTile(
+                title: Text("Modo Repetición (Loop)", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: Text("No para hasta que abras el pedido", style: GoogleFonts.montserrat(fontSize: 11)),
+                value: _alarmaLoop,
+                activeColor: const Color(0xFFFF7F50),
+                onChanged: (val) => setState(() => _alarmaLoop = val),
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    // TEST DE SONIDO REAL CON EL URI DEL CELULAR
+                    FlutterRingtonePlayer().stop();
+                    _channel.invokeMethod('stopAllSounds');
+                    
+                    if (_alarmaUri != null) {
+                      await _channel.invokeMethod('playCustomRingtone', {
+                        'uri': _alarmaUri,
+                        'volume': _alarmaVolumen / 100.0,
+                        'loop': _alarmaLoop,
+                      });
+                    } else {
+                      // Fallback si no hay URI
+                      FlutterRingtonePlayer().playNotification();
+                    }
+                    Future.delayed(const Duration(seconds: 4), () {
+                      FlutterRingtonePlayer().stop();
+                      _channel.invokeMethod('stopAllSounds');
+                    });
+                  },
+                  icon: const Icon(Icons.play_circle_fill, color: Colors.white),
+                  label: const Text("PROBAR ALERTA", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                ),
+              ),
+            ]),
+
+            const SizedBox(height: 25),
             
             _buildSectionTitle("Cobros (Mercado Pago / Transferencia)"),
             _buildCard([
