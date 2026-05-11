@@ -173,7 +173,8 @@ class _CartSummaryScreenState extends State<CartSummaryScreen> {
       // --- MAGIA: GENERACIÓN DE TICKET PREMIUM ---
       String productDetail = "";
       for (var p in productos) {
-        productDetail += "• ${p['cantidad']}x ${p['nombre']}\n";
+        final double unitPrice = p['precio_unitario'] as double;
+        productDetail += "• ${p['cantidad']} ${p['nombre']} \$${unitPrice.toStringAsFixed(2).replaceAll('.', ',')}\n";
       }
 
       final String orderIdShort = docRef.id.length > 4 ? docRef.id.substring(docRef.id.length - 4).toUpperCase() : docRef.id.toUpperCase();

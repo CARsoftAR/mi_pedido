@@ -42,7 +42,7 @@
         <!--
           android:authorities DEBE coincidir con applicationId + ".fileprovider" al compilar.
           Flavor cliente: com.pizzeriagonzalo.cliente → com.pizzeriagonzalo.cliente.fileprovider
-          Flavor admin: com.pizzeriagonzalo.admin → com.pizzeriagonzalo.admin.fileprovider
+          Flavor admin: com.pizzeriagonzalo.gestion → com.pizzeriagonzalo.gestion.fileprovider
           No hardcodear otro package (p. ej. com.pizzeria.miguelangel): bloquea los URI.
         -->
         <provider

@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -33,13 +34,19 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
   final TextEditingController _whatsappController = TextEditingController();
   final TextEditingController _minutosEdicionController = TextEditingController(text: '5');
 
+  // Controlador Mercado Pago
+  bool _activarMp = false;
+
+  TimeOfDay _horaApertura = const TimeOfDay(hour: 20, minute: 0);
+  TimeOfDay _horaCierre = const TimeOfDay(hour: 4, minute: 0);
+
   int _estadoControl = 1; // 0=Cerrado, 1=Auto, 2=Abierto
   bool _isSaving = false;
   bool _isLoading = true;
   bool _isClosing = false;
   bool _mostrarEmpanadasMaster = false;
   
-  // VARIABLES DE ALARMA (Nuevas, desde cero)
+  // VARIABLES DE ALARMA
   bool _alarmaEnabled = true;
   String _alarmaTono = 'Corto'; // Sirena, Campana, Corto
   String? _alarmaUri; // URI del tono elegido
@@ -81,12 +88,10 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
 
   void _cargarConfiguracion() async {
     try {
-      // Intentar cargar desde la nueva colección config
       final localDoc = await FirebaseFirestore.instance.collection('config').doc('datos_local').get();
       final mpDoc = await FirebaseFirestore.instance.collection('config').doc('mercado_pago').get();
 
       if (localDoc.exists) {
-        // USO DE LA NUEVA DATA (Ya migrada)
         final data = localDoc.data()!;
         final mpData = mpDoc.data() ?? {};
         setState(() {
@@ -104,68 +109,35 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
           _docenaEspecialController.text = _formatPrice(data['docena_especial'] ?? 0);
           _estadoControl = data['estado_control'] ?? 1;
           _mostrarEmpanadasMaster = data['mostrar_empanadas'] ?? false;
+          _minutosEdicionController.text = (data['minutos_edicion'] ?? '5').toString();
+          
+          if (data['hora_apertura'] != null) {
+            final parts = data['hora_apertura'].split(':');
+            if (parts.length == 2) _horaApertura = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+          }
+          if (data['hora_cierre'] != null) {
+            final parts = data['hora_cierre'].split(':');
+            if (parts.length == 2) _horaCierre = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+          }
+
           _aliasController.text = mpData['alias_mp'] ?? '';
           _cbuController.text = mpData['cbu_cvu'] ?? '';
           _whatsappController.text = mpData['whatsapp_comprobantes'] ?? '';
+          _activarMp = mpData['activar_mp'] ?? false;
         });
-      } else {
-        // FALLBACK: Intentar leer de la colección vieja por si aún no se migró
-        final oldDoc = await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').get();
-        if (oldDoc.exists) {
-           final oldData = oldDoc.data()!;
-           setState(() {
-              _nombreController.text = oldData['nombre'] ?? 'Pizzería Miguel Angel';
-              _sloganController.text = oldData['slogan'] ?? '¡Pizzería Gourmet!';
-              _direccionController.text = oldData['direccion'] ?? '';
-              _horarioController.text = oldData['horario'] ?? '';
-              _demoraController.text = oldData['tiempo_demora'] ?? '';
-              _deliveryController.text = _formatPrice(oldData['precio_delivery'] ?? 0);
-              _envioBarrioController.text = _formatPrice(oldData['v_envio_barrio'] ?? 0);
-              _envioRetiroController.text = _formatPrice(oldData['v_envio_retiro'] ?? 0);
-              _unidadComunController.text = _formatPrice(oldData['unidad_comun'] ?? 0);
-              _docenaComunController.text = _formatPrice(oldData['docena_comun'] ?? 0);
-              _unidadEspecialController.text = _formatPrice(oldData['unidad_especial'] ?? 0);
-              _docenaEspecialController.text = _formatPrice(oldData['docena_especial'] ?? 0);
-              _estadoControl = oldData['estado_control'] ?? 1;
-              _mostrarEmpanadasMaster = oldData['mostrar_empanadas'] ?? false;
-              _aliasController.text = oldData['alias_mp'] ?? '';
-              _cbuController.text = oldData['cbu_cvu'] ?? '';
-              _whatsappController.text = oldData['whatsapp_comprobantes'] ?? '';
-           });
-           // Migrar silenciosamente para la próxima vez
-           _guardarConfiguracion(); 
-        } else {
-           // Inicializar con vacíos si de verdad no hay nada en ningún lado
-           await FirebaseFirestore.instance.collection('config').doc('datos_local').set({
-             'nombre': 'Pizzería Miguel Angel',
-             'slogan': '¡Pizzería Gourmet!',
-             'estado_control': 1,
-             'updated_at': FieldValue.serverTimestamp(),
-           });
-        }
       }
 
-      // 4. CARGAR ALARMA (Nuevas, desde cero)
       final alarmaDoc = await FirebaseFirestore.instance.collection('config').doc('alarma').get();
       if (alarmaDoc.exists) {
         final aData = alarmaDoc.data()!;
         setState(() {
           _alarmaEnabled = aData['enabled'] ?? true;
           _alarmaTono = aData['tono'] ?? 'Corto';
-          _alarmaUri = aData['uri']; // Recuperamos el URI específico
+          _alarmaUri = aData['uri']; 
           _alarmaVolumen = (aData['volume'] ?? 1.0) * 100.0;
           _alarmaLoop = aData['loop'] ?? false;
         });
-      } else {
-        await FirebaseFirestore.instance.collection('config').doc('alarma').set({
-          'enabled': true,
-          'tono': 'Corto',
-          'volume': 1.0,
-          'loop': false,
-          'updated_at': FieldValue.serverTimestamp(),
-        });
       }
-
     } catch (e) {
       debugPrint("Error al recuperar configuración: $e");
     } finally {
@@ -177,30 +149,18 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
     if (_estadoControl == 0) return false;
     if (_estadoControl == 2) return true;
     
-    // Modo AUTO (1) - Lógica Dinámica
-    try {
-      final horario = _horarioController.text.toLowerCase();
-      // Buscamos números de 1 o 2 dígitos
-      final matches = RegExp(r'(\d{1,2})').allMatches(horario).toList();
-      
-      if (matches.length >= 2) {
-        int start = int.parse(matches[0].group(0)!);
-        int end = int.parse(matches[matches.length - 1].group(0)!);
-        
-        final int now = DateTime.now().hour;
-        if (start > end) { // Cruza medianoche
-          return (now >= start) || (now < end);
-        } else {
-          return (now >= start) && (now < end);
-        }
-      }
-    } catch (e) {
-      debugPrint("Error parseando horario: $e");
+    final now = TimeOfDay.now();
+    double nowVal = now.hour + now.minute / 60.0;
+    double startVal = _horaApertura.hour + _horaApertura.minute / 60.0;
+    double endVal = _horaCierre.hour + _horaCierre.minute / 60.0;
+    
+    if (startVal > endVal) {
+      // Cruzando la medianoche (ej: 20:00 a 04:00)
+      return (nowVal >= startVal || nowVal < endVal);
+    } else {
+      // Horario normal (ej: 10:00 a 20:00)
+      return (nowVal >= startVal && nowVal < endVal);
     }
-
-    // Fallback original
-    final int hora = DateTime.now().hour;
-    return (hora >= 20) || (hora < 4);
   }
 
   void _guardarConfiguracion() async {
@@ -211,7 +171,9 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         'nombre': _nombreController.text.trim(),
         'slogan': _sloganController.text.trim(),
         'direccion': _direccionController.text.trim(),
-        'horario': _horarioController.text.trim(),
+        'horario': '${_horaApertura.hour.toString().padLeft(2, '0')}:${_horaApertura.minute.toString().padLeft(2, '0')} a ${_horaCierre.hour.toString().padLeft(2, '0')}:${_horaCierre.minute.toString().padLeft(2, '0')}',
+        'hora_apertura': '${_horaApertura.hour.toString().padLeft(2, '0')}:${_horaApertura.minute.toString().padLeft(2, '0')}',
+        'hora_cierre': '${_horaCierre.hour.toString().padLeft(2, '0')}:${_horaCierre.minute.toString().padLeft(2, '0')}',
         'tiempo_demora': _demoraController.text.trim(),
         'precio_delivery': _parsePrice(_deliveryController.text),
         'v_envio_barrio': _parsePrice(_envioBarrioController.text),
@@ -222,18 +184,20 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         'docena_especial': _parsePrice(_docenaEspecialController.text),
         'estado_control': _estadoControl,
         'mostrar_empanadas': _mostrarEmpanadasMaster,
+        'minutos_edicion': _minutosEdicionController.text.trim(),
         'updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 2. GUARDAR MERCADO PAGO (SIN CAMBIOS)
+      // 2. GUARDAR MERCADO PAGO
       await FirebaseFirestore.instance.collection('config').doc('mercado_pago').set({
         'alias_mp': _aliasController.text.trim(),
         'cbu_cvu': _cbuController.text.trim(),
         'whatsapp_comprobantes': _whatsappController.text.trim(),
+        'activar_mp': _activarMp,
         'updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 3. GUARDAR ALARMA (NUEVOS AJUSTES CON URI)
+      // 3. GUARDAR ALARMA
       await FirebaseFirestore.instance.collection('config').doc('alarma').set({
         'enabled': _alarmaEnabled,
         'tono': _alarmaTono,
@@ -243,30 +207,26 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         'updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 4. ESPEJAR EN CONFIGURACION_LOCAL PARA COMPATIBILIDAD CON APP CLIENTE
-      await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set({
-        'nombre': _nombreController.text.trim(),
-        'slogan': _sloganController.text.trim(),
-        'direccion': _direccionController.text.trim(),
-        'horario': _horarioController.text.trim(),
-        'tiempo_demora': _demoraController.text.trim(),
-        'precio_delivery': _parsePrice(_deliveryController.text),
-        'v_envio_barrio': _parsePrice(_envioBarrioController.text),
-        'v_envio_retiro': _parsePrice(_envioRetiroController.text),
-        'unidad_comun': _parsePrice(_unidadComunController.text),
-        'docena_comun': _parsePrice(_docenaComunController.text),
-        'unidad_especial': _parsePrice(_unidadEspecialController.text),
-        'docena_especial': _parsePrice(_docenaEspecialController.text),
-        'alias_mp': _aliasController.text.trim(),
-        'whatsapp_comprobantes': _whatsappController.text.trim(),
-        'mostrar_empanadas': _mostrarEmpanadasMaster,
-        'estado_control': _estadoControl,
-      }, SetOptions(merge: true));
-
-      // 4. ACTUALIZAR ESTADO DINÁMICO (estaAbierto)
+      // 4. ACTUALIZAR ESTADO DINÁMICO
       await FirebaseFirestore.instance.collection('configuracion').doc('local').set({
         'estaAbierto': _checkStatus(),
         'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 5. REGISTRAR NEGOCIO PARA PLATAFORMA ADMIN WINDOWS
+      String businessId = _nombreController.text.trim().toLowerCase().replaceAll(' ', '_').replaceAll(RegExp(r'[^\w\s]+'), '');
+      if (businessId.isEmpty) businessId = 'negocio_sin_nombre';
+
+      final businessSnap = await FirebaseFirestore.instance.collection('configuracion_negocio').doc(businessId).get();
+      
+      await FirebaseFirestore.instance.collection('configuracion_negocio').doc(businessId).set({
+        'nombre': _nombreController.text.trim(),
+        'ultima_actualizacion': FieldValue.serverTimestamp(),
+        'activo': businessSnap.exists ? (businessSnap.data()?['activo'] ?? true) : true,
+        if (!businessSnap.exists) 'estado_pago': 'Pendiente',
+        if (!businessSnap.exists) 'vencimiento': DateTime.now().add(const Duration(days: 30)).toIso8601String(),
+        if (!businessSnap.exists) 'deuda_acumulada': 0.0,
+        if (!businessSnap.exists) 'comision_porcentaje': 5.0,
       }, SetOptions(merge: true));
 
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuración guardada correctamente'), backgroundColor: Colors.green));
@@ -289,43 +249,26 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
         ],
       ),
     );
-
     if (confirmed != true) return;
-
     setState(() => _isClosing = true);
     try {
-      final query = await FirebaseFirestore.instance
-          .collection('pedidos')
-          .where('estado', isEqualTo: 'Finalizado')
-          .get();
-
+      final query = await FirebaseFirestore.instance.collection('pedidos').where('estado', isEqualTo: 'Finalizado').get();
       final untrackedDocs = query.docs.where((doc) => (doc.data()['contabilizado'] ?? false) == false).toList();
-
       if (untrackedDocs.isEmpty) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay pedidos nuevos para cerrar')));
         return;
       }
-
       double totalMonto = 0;
-      for (var doc in untrackedDocs) {
-        totalMonto += (doc.data()['total'] ?? 0).toDouble();
-      }
-
+      for (var doc in untrackedDocs) totalMonto += (doc.data()['total'] ?? 0).toDouble();
       await FirebaseFirestore.instance.collection('cierres_caja').add({
         'fecha_cierre': FieldValue.serverTimestamp(),
         'monto_total': totalMonto,
         'total_pedidos': untrackedDocs.length,
       });
-
       final batch = FirebaseFirestore.instance.batch();
-      for (var doc in untrackedDocs) {
-        batch.update(doc.reference, {'contabilizado': true});
-      }
+      for (var doc in untrackedDocs) batch.update(doc.reference, {'contabilizado': true});
       await batch.commit();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cierre de caja realizado con éxito'), backgroundColor: Colors.green));
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cierre de caja realizado con éxito'), backgroundColor: Colors.green));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en el cierre: $e'), backgroundColor: Colors.red));
     } finally {
@@ -335,586 +278,352 @@ class _ConfiguracionPageState extends State<ConfiguracionPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
+    // Si quisieran ver una actualización en vivo de Cierres o Ventas, 
+    // se podría usar un StreamBuilder. Por ahora, el formulario principal 
+    // es estático (Stateful) para evitar perder el foco al tipear.
+    
+    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: Text("Ajustes del Negocio", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: Text("Ajustes del Negocio", style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 20, color: Colors.black87)),
         centerTitle: true,
         elevation: 0,
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.white.withOpacity(0.5),
+        flexibleSpace: ClipRRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
         foregroundColor: Colors.black87,
         actions: [
+          IconButton(icon: const Icon(Icons.refresh, color: Color(0xFFFF7F50)), onPressed: () { _cargarConfiguracion(); }),
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.blue),
-            onPressed: () async {
-              await FirebaseFirestore.instance.clearPersistence();
-              _cargarConfiguracion();
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Caché limpiada y datos recargados')));
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.red),
-            onPressed: () async {
-              final confirmed = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text("Cerrar Sesión"),
-                  content: const Text("¿Estás seguro de que quieres salir de la cuenta de administrador?"),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCELAR")),
-                    ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text("CERRAR SESIÓN")),
-                  ],
-                ),
-              );
-
-              if (confirmed == true) {
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.clear();
-                // En la App Admin, redirige a una pantalla de salida o simplemente aviso
-                if (mounted) {
-                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sesión Cerrada. Reinicie la App.")));
-                }
-              }
-            },
-            tooltip: "Cerrar Sesión",
-          ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistorialCierresPage())),
-            tooltip: "Historial de Cierres",
+            icon: const Icon(Icons.history, color: Color(0xFFFF7F50)),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const Scaffold(body: Center(child: Text("Próximamente..."))))),
           )
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            // DASHBOARD CIERRE DE CAJA
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('pedidos').where('estado', isEqualTo: 'Finalizado').snapshots(),
-              builder: (context, snapshot) {
-                double totalActual = 0;
-                int countActual = 0;
-                if (snapshot.hasData) {
-                  for (var doc in snapshot.data!.docs) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    if ((data['contabilizado'] ?? false) == false) {
-                      totalActual += (data['total'] ?? 0).toDouble();
-                      countActual++;
-                    }
-                  }
-                }
-                return Column(
-                  children: [
-                    _buildDashboard(totalActual, countActual),
-                    const SizedBox(height: 15),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _isClosing ? null : _realizarCierreCaja,
-                            icon: _isClosing 
-                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                : const Icon(Icons.lock_outline, size: 20),
-                            label: const Text("REALIZAR CIERRE DE CAJA", style: TextStyle(fontWeight: FontWeight.bold)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blueGrey[800],
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size(double.infinity, 50),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                            ),
-                          ),
-                        ),
-                      ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFFFF0E6), Color(0xFFFFDAB9), Color(0xFFFFF5EE)],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Column(
+              children: [
+                _buildDashboard(),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: _isClosing ? null : _realizarCierreCaja,
+                  icon: const Icon(Icons.lock_outline, size: 20),
+                  label: const Text("REALIZAR CIERRE DE CAJA", style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.1)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueGrey[900],
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 55),
+                    elevation: 8,
+                    shadowColor: Colors.blueGrey.withOpacity(0.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
+                  ),
+                ),
+                const SizedBox(height: 25),
+                _buildSectionTitle("Control del Local"),
+                _buildCard([
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_estadoControl == 0 ? "CERRADO ❌" : (_estadoControl == 2 ? "SIEMPRE ABIERTO ✅" : "MODO AUTO 🔄"), style: GoogleFonts.montserrat(fontWeight: FontWeight.w900, fontSize: 14)),
+                      const SizedBox(height: 15),
+                      Row(
+                        children: [
+                          Expanded(child: _smallStateBtn(0, "CERRAR", Colors.redAccent)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _smallStateBtn(1, "AUTO", Colors.blueAccent)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _smallStateBtn(2, "ABRIR", Colors.green)),
+                        ],
+                      )
+                    ],
+                  ),
+                  if (_estadoControl == 1) ...[
+                    const SizedBox(height: 20),
+                    Container(
+                      padding: const EdgeInsets.all(15),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        children: [
+                          Text("Rango Horario de Atención Automática", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blueGrey[800])),
+                          const SizedBox(height: 15),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              _buildTimeSelector("Apertura", _horaApertura, (time) => setState(() => _horaApertura = time)),
+                              const Icon(Icons.arrow_forward_rounded, color: Colors.blueAccent),
+                              _buildTimeSelector("Cierre", _horaCierre, (time) => setState(() => _horaCierre = time)),
+                            ],
+                          )
+                        ],
+                      ),
                     ),
                   ],
-                );
-              },
-            ),
-            const SizedBox(height: 15),
-            _buildSectionTitle("Control del Local"),
-            _buildCard([
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                ]),
+                const SizedBox(height: 25),
+                
+                _buildSectionTitle("Opciones de Pedidos"),
+                _buildCard([
+                  _buildTextField("Tiempo de Espera (minutos)", _demoraController, Icons.timer, isNumeric: true),
+                  const SizedBox(height: 15),
+                  _buildTextField("Minutos para cancelar/editar", _minutosEdicionController, Icons.edit_note, isNumeric: true),
+                  const SizedBox(height: 15),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _estadoControl == 0 
-                            ? "CERRADO ❌" 
-                            : (_estadoControl == 2 ? "SIEMPRE ABIERTO ✅" : (_checkStatus() ? "AUTO: ABIERTO ✅" : "AUTO: CERRADO ❌")),
-                        style: GoogleFonts.montserrat(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 16,
-                          color: _estadoControl == 0 
-                              ? Colors.red[700] 
-                              : (_estadoControl == 2 
-                                  ? Colors.green[700] 
-                                  : (_checkStatus() ? Colors.green[700] : Colors.grey[700])),
-                        ),
+                      Text("Alerta Sonora de Pedido", style: GoogleFonts.montserrat(fontWeight: FontWeight.w700, color: Colors.black87)),
+                      Switch(value: _alarmaEnabled, onChanged: (v) => setState(() => _alarmaEnabled = v), activeColor: const Color(0xFFFF6B35)),
+                    ],
+                  ),
+                  if (_alarmaEnabled) ...[
+                    const SizedBox(height: 15),
+                    DropdownButtonFormField<String>(
+                      value: _alarmaTono,
+                      items: ['Corto', 'Campana', 'Sirena'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                      onChanged: (v) => setState(() => _alarmaTono = v!),
+                      style: GoogleFonts.montserrat(fontWeight: FontWeight.w600, color: Colors.black87),
+                      decoration: InputDecoration(
+                        labelText: "Tono de Notificación",
+                        prefixIcon: const Icon(Icons.music_note, color: Color(0xFFFF6B35)),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.6),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _estadoControl == 1 ? Colors.blue[50] : Colors.grey[100],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          _estadoControl == 1 ? "MODO RELOJ" : "MODO MANUAL",
-                          style: GoogleFonts.montserrat(fontSize: 10, fontWeight: FontWeight.bold, color: _estadoControl == 1 ? Colors.blue[800] : Colors.grey[700]),
-                        ),
-                      ),
+                    ),
+                  ]
+                ]),
+                const SizedBox(height: 25),
+
+                _buildSectionTitle("Módulo de Mercado Pago"),
+                _buildCard([
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text("Activar Pago Digital", style: GoogleFonts.montserrat(fontWeight: FontWeight.w700, color: Colors.black87)),
+                      Switch(value: _activarMp, onChanged: (v) => setState(() => _activarMp = v), activeColor: const Color(0xFFFF6B35)),
                     ],
                   ),
                   const SizedBox(height: 15),
-                  Container(
-                    width: double.infinity,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Row(
-                      children: [
-                        _buildStateButton(0, "CERRADO", Colors.red),
-                        _buildStateButton(1, "AUTO", Colors.blue),
-                        _buildStateButton(2, "ABIERTO", Colors.green),
-                      ],
-                    ),
+                  _buildTextField("Alias MP", _aliasController, Icons.account_balance_wallet),
+                  const SizedBox(height: 15),
+                  _buildTextField("CBU / CVU", _cbuController, Icons.credit_card),
+                ]),
+                const SizedBox(height: 25),
+
+                _buildSectionTitle("Branding"),
+                _buildCard([
+                  _buildTextField("Nombre", _nombreController, Icons.storefront),
+                  const SizedBox(height: 15),
+                  _buildTextField("Eslogan", _sloganController, Icons.auto_awesome),
+                ]),
+                const SizedBox(height: 25),
+                 _buildSectionTitle("Envíos"),
+                _buildCard([
+                  _buildTextField("Al Barrio \$", _envioBarrioController, Icons.local_shipping, isNumeric: true),
+                  const SizedBox(height: 15),
+                  _buildTextField("A la Villa \$", _deliveryController, Icons.directions_bike, isNumeric: true),
+                  const SizedBox(height: 15),
+                  _buildTextField("Retiro \$", _envioRetiroController, Icons.store, isNumeric: true),
+                ]),
+                const SizedBox(height: 35),
+                ElevatedButton(
+                  onPressed: _isSaving ? null : _guardarConfiguracion,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF6B35), // Naranja vibrante
+                    minimumSize: const Size(double.infinity, 60), 
+                    elevation: 10,
+                    shadowColor: const Color(0xFFFF6B35).withOpacity(0.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _estadoControl == 0 
-                      ? "El local ignora el reloj y figura siempre CERRADO." 
-                      : (_estadoControl == 2 
-                        ? "El local ignora el reloj y figura siempre ABIERTO."
-                        : "El local respeta el horario: ${_horarioController.text}"),
-                    style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ]),
-            const SizedBox(height: 20),
-            
-            _buildSectionTitle("Branding de la Tienda"),
-            _buildCard([
-              _buildTextField("Nombre de la Pizzería", _nombreController, Icons.storefront),
-              _buildTextField("Eslogan o Frase", _sloganController, Icons.auto_awesome),
-            ]),
-
-            const SizedBox(height: 25),
-
-            _buildSectionTitle("Gestión de Envíos"),
-            _buildCard([
-              _buildTextField("Envío al Barrio \$", _envioBarrioController, Icons.local_shipping, isNumeric: true),
-              _buildTextField("Envío a la Villa \$", _deliveryController, Icons.directions_bike, isNumeric: true),
-              _buildTextField("Retiro por el Local \$", _envioRetiroController, Icons.store, isNumeric: true),
-            ]),
-
-            const SizedBox(height: 25),
-
-            _buildSectionTitle("Demora y Edición de Pedidos"),
-            _buildCard([
-              _buildTextField("Dirección del Local", _direccionController, Icons.map),
-              _buildTextField("Horario de Atención", _horarioController, Icons.access_time),
-              _buildTextField("Demora estimada (ej: 40-50 min)", _demoraController, Icons.timer),
-              _buildTextField("Límite de edición (minutos)", _minutosEdicionController, Icons.edit_calendar, isNumeric: true),
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  "El cliente podrá editar su pedido hasta que pasen estos minutos.",
-                  style: GoogleFonts.montserrat(fontSize: 10, color: Colors.blueGrey[400], fontStyle: FontStyle.italic),
+                  child: _isSaving 
+                      ? const CircularProgressIndicator(color: Colors.white) 
+                      : Text("GUARDAR CAMBIOS", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.5)),
                 ),
-              ),
-            ]),
-            
-            const SizedBox(height: 25),
-
-            _buildSectionTitle("Módulo de Empanadas"),
-            _buildCard([
-              SwitchListTile(
-                title: Text("Activar Sección de Empanadas", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
-                subtitle: Text("Si se apaga, las empanadas no aparecerán en la carta ni se podrán editar precios.", style: GoogleFonts.montserrat(fontSize: 11)),
-                value: _mostrarEmpanadasMaster,
-                activeColor: const Color(0xFFFF7F50),
-                onChanged: (val) async {
-                  setState(() => _mostrarEmpanadasMaster = val);
-                  // Guardado inmediato para persistencia definitiva
-                  await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').set({
-                    'mostrar_empanadas': val,
-                  }, SetOptions(merge: true));
-                },
-              ),
-            ]),
-
-            const SizedBox(height: 25),
-            
-            // SECCIONES DE EMPANADAS (DINÁMICAS)
-            if (_mostrarEmpanadasMaster) ...[
-              _buildSectionTitle("Precios Empanadas Comunes"),
-              _buildCard([
-                Row(
-                  children: [
-                    Expanded(child: _buildTextField("Unidad \$", _unidadComunController, Icons.attach_money, isNumeric: true)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _buildTextField("Docena \$", _docenaComunController, Icons.shopping_basket, isNumeric: true)),
-                  ],
-                ),
-              ]),
-
-              const SizedBox(height: 25),
-              
-              _buildSectionTitle("Precios Empanadas Especiales"),
-              _buildCard([
-                Row(
-                  children: [
-                    Expanded(child: _buildTextField("Unidad \$", _unidadEspecialController, Icons.star_outline, isNumeric: true)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _buildTextField("Docena \$", _docenaEspecialController, Icons.grade, isNumeric: true)),
-                  ],
-                ),
-              ]),
-              const SizedBox(height: 25),
-            ],
-            
-            _buildSectionTitle("Alertas de Nuevos Pedidos (Alarma)"),
-            _buildCard([
-              SwitchListTile(
-                title: Text("Estado Maestro de Alarma", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
-                subtitle: Text("Activa o desactiva todas las notificaciones sonoras", style: GoogleFonts.montserrat(fontSize: 11)),
-                value: _alarmaEnabled,
-                activeColor: const Color(0xFFFF7F50),
-                onChanged: (val) => setState(() => _alarmaEnabled = val),
-              ),
-              const Divider(),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Selector de Sonido (Tonos del Celular)", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
-                    const SizedBox(height: 8),
-                    DropdownButton<String>(
-                      value: _systemRingtones.any((r) => r['uri'] == _alarmaUri) ? _alarmaUri : null,
-                      isExpanded: true,
-                      hint: Text("Elegí un sonido del sistema", style: GoogleFonts.montserrat(fontSize: 12)),
-                      items: _systemRingtones.map((r) => DropdownMenuItem(
-                        value: r['uri'] as String, 
-                        child: Text(r['title'] ?? 'Tono', style: GoogleFonts.montserrat(fontSize: 12))
-                      )).toList(),
-                      onChanged: (val) {
-                        final res = _systemRingtones.firstWhere((r) => r['uri'] == val);
-                        setState(() {
-                          _alarmaUri = val;
-                          _alarmaTono = res['title'] ?? 'Sistema';
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text("Volumen de Alerta: ${_alarmaVolumen.round()}%", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
-                        Icon(_alarmaVolumen > 50 ? Icons.volume_up : Icons.volume_down, size: 18, color: Colors.grey),
-                      ],
-                    ),
-                    Slider(
-                      value: _alarmaVolumen,
-                      min: 0,
-                      max: 100,
-                      divisions: 10,
-                      activeColor: const Color(0xFFFF7F50),
-                      onChanged: (val) => setState(() => _alarmaVolumen = val),
-                    ),
-                  ],
-                ),
-              ),
-              SwitchListTile(
-                title: Text("Modo Repetición (Loop)", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 13)),
-                subtitle: Text("No para hasta que abras el pedido", style: GoogleFonts.montserrat(fontSize: 11)),
-                value: _alarmaLoop,
-                activeColor: const Color(0xFFFF7F50),
-                onChanged: (val) => setState(() => _alarmaLoop = val),
-              ),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    // TEST DE SONIDO REAL CON EL URI DEL CELULAR
-                    FlutterRingtonePlayer().stop();
-                    _channel.invokeMethod('stopAllSounds');
-                    
-                    if (_alarmaUri != null) {
-                      await _channel.invokeMethod('playCustomRingtone', {
-                        'uri': _alarmaUri,
-                        'volume': _alarmaVolumen / 100.0,
-                        'loop': _alarmaLoop,
-                      });
-                    } else {
-                      // Fallback si no hay URI
-                      FlutterRingtonePlayer().playNotification();
-                    }
-                    Future.delayed(const Duration(seconds: 4), () {
-                      FlutterRingtonePlayer().stop();
-                      _channel.invokeMethod('stopAllSounds');
-                    });
-                  },
-                  icon: const Icon(Icons.play_circle_fill, color: Colors.white),
-                  label: const Text("PROBAR ALERTA", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                ),
-              ),
-            ]),
-
-            const SizedBox(height: 25),
-            
-            _buildSectionTitle("Cobros (Mercado Pago / Transferencia)"),
-            _buildCard([
-              _buildTextField("Alias Mercado Pago", _aliasController, Icons.account_balance_wallet_outlined),
-              _buildTextField("Teléfono", _cbuController, Icons.phone_android),
-              _buildTextField("WhatsApp para Comprobantes", _whatsappController, Icons.chat_bubble_outline, isPhone: true),
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Text(
-                  "Este número se usará para recibir los comprobantes de transferencia.",
-                  style: GoogleFonts.montserrat(fontSize: 11, color: Colors.grey[500], fontStyle: FontStyle.italic),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ]),
-            
-            const SizedBox(height: 30),
-            
-            ElevatedButton(
-              onPressed: _isSaving ? null : _guardarConfiguracion,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF7F50),
-                minimumSize: const Size(double.infinity, 55),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                elevation: 4,
-                shadowColor: const Color(0xFFFF7F50).withOpacity(0.4),
-              ),
-              child: _isSaving 
-                ? const SizedBox(width: 25, height: 25, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
-                : const Text("GUARDAR CAMBIOS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 40),
+              ],
             ),
-            const SizedBox(height: 40),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildDashboard(double total, int count) {
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFF7F50), Color(0xFFFF4500)],
+  Widget _smallStateBtn(int val, String label, Color color) {
+    bool sel = _estadoControl == val;
+    return GestureDetector(
+      onTap: () => setState(() => _estadoControl = val),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: sel ? color : Colors.white.withOpacity(0.5), 
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: sel ? color : Colors.grey.withOpacity(0.3)),
+          boxShadow: sel ? [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 2))] : []
         ),
-        borderRadius: BorderRadius.circular(25),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.orange.withOpacity(0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          )
-        ],
+        child: Text(label, style: TextStyle(color: sel ? Colors.white : Colors.black54, fontSize: 10, fontWeight: FontWeight.w900)),
       ),
-      child: Column(
-        children: [
-          Text("VENTAS ACTUALES (POR CERRAR)", style: GoogleFonts.montserrat(color: Colors.white.withOpacity(0.8), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-          const SizedBox(height: 8),
-          Text("\$ ${total.toStringAsFixed(2)}", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w900)),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 15),
-            child: Divider(color: Colors.white24, height: 1),
+    );
+  }
+
+  Widget _buildDashboard() {
+     return StreamBuilder<QuerySnapshot>(
+      // Permite mostrar estadísticas reales del negocio en el Panel (si las hubiera)
+      stream: FirebaseFirestore.instance.collection('pedidos').where('estado', isEqualTo: 'Finalizado').snapshots(),
+      builder: (context, snapshot) {
+        int ordenesFinalizadas = snapshot.data?.docs.length ?? 0;
+        return Container(
+          padding: const EdgeInsets.all(25),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFFF7F50), Color(0xFFFF4500)]
+            ),
+            borderRadius: BorderRadius.circular(25),
+            boxShadow: [
+              BoxShadow(color: const Color(0xFFFF4500).withOpacity(0.4), blurRadius: 15, offset: const Offset(0, 8))
+            ]
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.check_circle_outline, color: Colors.white70, size: 18),
-              const SizedBox(width: 10),
-              Text("Pedidos sin contabilizar: $count", style: GoogleFonts.montserrat(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-            ],
+          child: Center(
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.dashboard_customize_rounded, color: Colors.white, size: 28),
+                    const SizedBox(width: 15),
+                    Text("Panel de Control", style: GoogleFonts.montserrat(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: 1.2)),
+                  ],
+                ),
+                if (ordenesFinalizadas > 0) ...[
+                  const SizedBox(height: 10),
+                  Text("Órdenes Hoy: $ordenesFinalizadas", style: GoogleFonts.montserrat(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 14)),
+                ]
+              ],
+            )
           ),
-        ],
-      ),
+        );
+      }
     );
   }
 
   Widget _buildSectionTitle(String title) {
     return Align(
-      alignment: Alignment.centerLeft,
+      alignment: Alignment.centerLeft, 
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 12, left: 5),
+        padding: const EdgeInsets.only(bottom: 12, left: 5), 
         child: Text(
-          title.toUpperCase(),
-          style: GoogleFonts.montserrat(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey[700],
-            letterSpacing: 1.2,
-          ),
-        ),
-      ),
+          title.toUpperCase(), 
+          style: GoogleFonts.montserrat(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.blueGrey[800], letterSpacing: 1.2)
+        )
+      )
     );
   }
 
   Widget _buildCard(List<Widget> children) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 15,
-            offset: const Offset(0, 4),
-          )
-        ],
-      ),
-      child: Column(children: children),
-    );
-  }
-
-  Widget _buildStateButton(int value, String label, Color activeColor) {
-    bool isSelected = _estadoControl == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () async {
-          setState(() => _estadoControl = value);
-          // value: 0=Cerrado, 1=Auto(Abierto), 2=Siempre Abierto
-          final bool nuevoEstado = value != 0; // 0=cerrado, 1 y 2 = abierto
-          try {
-            // Escribe el estado_control para la app admin
-            await FirebaseFirestore.instance.collection('configuracion_local').doc('precios').update({
-              'estado_control': value,
-              'updated_at': FieldValue.serverTimestamp(),
-            });
-            // SINCRONIZACIÓN EN TIEMPO REAL: escribe estaAbierto para la app cliente
-            await FirebaseFirestore.instance.collection('configuracion').doc('local').set({
-              'estaAbierto': nuevoEstado,
-              'updated_at': FieldValue.serverTimestamp(),
-            }, SetOptions(merge: true));
-          } catch (e) {
-            debugPrint("Error updating status: $e");
-          }
-        },
-
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
+          padding: const EdgeInsets.all(20), 
           decoration: BoxDecoration(
-            color: isSelected ? activeColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: GoogleFonts.montserrat(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: isSelected ? Colors.white : Colors.grey[600],
-            ),
-          ),
+            color: Colors.white.withOpacity(0.65), 
+            borderRadius: BorderRadius.circular(24), 
+            border: Border.all(color: Colors.white.withOpacity(0.8), width: 1.5),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 20, spreadRadius: 5)
+            ]
+          ), 
+          child: Column(children: children)
         ),
       ),
     );
   }
 
-  Widget _buildTextField(String label, TextEditingController controller, IconData icon, {bool isNumeric = false, bool isPhone = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: TextField(
-        controller: controller,
-        keyboardType: isNumeric || isPhone ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
-        style: GoogleFonts.montserrat(fontSize: 14, fontWeight: FontWeight.w500),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: TextStyle(color: Colors.grey[600], fontSize: 13),
-          prefixIcon: Icon(icon, size: 20, color: const Color(0xFFFF7F50)),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-          filled: true,
-          fillColor: Colors.grey[50],
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+  Widget _buildTextField(String label, TextEditingController controller, IconData icon, {bool isNumeric = false}) {
+    return TextField(
+      controller: controller,
+      keyboardType: isNumeric ? TextInputType.number : TextInputType.text,
+      style: GoogleFonts.montserrat(fontWeight: FontWeight.w600, color: Colors.black87),
+      decoration: InputDecoration(
+        labelText: label, 
+        labelStyle: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w500),
+        prefixIcon: Icon(icon, color: const Color(0xFFFF6B35)), 
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.6),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: Color(0xFFFF6B35), width: 2)),
+      ),
+    );
+  }
+
+  Widget _buildTimeSelector(String label, TimeOfDay time, Function(TimeOfDay) onChanged) {
+    return GestureDetector(
+      onTap: () async {
+        final TimeOfDay? picked = await showTimePicker(
+          context: context,
+          initialTime: time,
+          builder: (context, child) {
+            return Theme(
+              data: ThemeData.light().copyWith(
+                colorScheme: const ColorScheme.light(
+                  primary: Color(0xFFFF6B35), 
+                  onPrimary: Colors.white,
+                  surface: Colors.white,
+                  onSurface: Colors.black87,
+                ),
+                dialogBackgroundColor: Colors.white,
+              ),
+              child: child!,
+            );
+          },
+        );
+        if (picked != null) {
+          onChanged(picked);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.8),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFF6B35).withOpacity(0.5)),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))
+          ]
+        ),
+        child: Column(
+          children: [
+            Text(label, style: GoogleFonts.montserrat(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+            const SizedBox(height: 5),
+            Text(
+              "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}",
+              style: GoogleFonts.montserrat(fontSize: 18, fontWeight: FontWeight.w900, color: const Color(0xFFFF6B35)),
+            )
+          ],
         ),
       ),
     );
   }
 }
-
-class HistorialCierresPage extends StatelessWidget {
-  const HistorialCierresPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF9F9F9),
-      appBar: AppBar(
-        title: Text("Historial de Cierres", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 18)),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('cierres_caja').orderBy('fecha_cierre', descending: true).snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(child: Text("No hay cierres registrados", style: GoogleFonts.montserrat(color: Colors.grey)));
-          }
-
-          return ListView.separated(
-            padding: const EdgeInsets.all(20),
-            itemCount: snapshot.data!.docs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
-              final date = (data['fecha_cierre'] as Timestamp).toDate();
-              final format = DateFormat('dd/MM/yyyy HH:mm');
-
-              return Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(15),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle),
-                      child: const Icon(Icons.receipt_long, color: Color(0xFFFF7F50)),
-                    ),
-                    const SizedBox(width: 15),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(format.format(date), style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 14)),
-                          Text("${data['total_pedidos']} pedidos registrados", style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[600])),
-                        ],
-                      ),
-                    ),
-                    Text("\$ ${data['monto_total'].toStringAsFixed(2)}", style: GoogleFonts.montserrat(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green[700])),
-                  ],
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-}
-

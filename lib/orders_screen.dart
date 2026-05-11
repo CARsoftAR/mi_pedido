@@ -25,6 +25,7 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
   bool _isShowingDialog = false;
   final AudioPlayer _audioPlayerInstance = AudioPlayer();
   static const _channel = MethodChannel('com.mipedido.pizzeria/sounds');
+  int _refreshCounter = 0;
 
   @override
   void initState() {
@@ -238,9 +239,22 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Color(0xFFFF7F50)),
+            tooltip: 'Forzar Reconexión',
+            onPressed: () {
+              setState(() {
+                _refreshCounter++;
+              });
+              debugPrint("Recarga forzada: Re-suscribiendo a Streams de Firestore (Intento $_refreshCounter)");
+            },
+          ),
           StreamBuilder<DocumentSnapshot>(
             stream: FirebaseFirestore.instance.collection('config').doc('alarma').snapshots(),
             builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                debugPrint("Error en Stream de Config Alarma: ${snapshot.error}");
+              }
               final bool isEnabled = (snapshot.data?.data() as Map?)?['enabled'] ?? true;
               return IconButton(
                 icon: Icon(
@@ -297,7 +311,34 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
           : estado == 'Historial/Entregas'
               ? FirebaseFirestore.instance.collection('pedidos').where('estado', whereIn: ['Despachado', 'Finalizado']).snapshots()
               : FirebaseFirestore.instance.collection('pedidos').where('estado', isEqualTo: estado).snapshots(),
+      key: ValueKey('stream_orders_${estado}_$_refreshCounter'),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          debugPrint("Error exacto en Stream de Pedidos ($estado): ${snapshot.error}");
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 40),
+                  const SizedBox(height: 10),
+                  Text(
+                    "Error de Conexión: ${snapshot.error}",
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.montserrat(color: Colors.red, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    "Si dice UNAVAILABLE: Problema de red.\nSi dice PERMISSION_DENIED: Error de Reglas Firebase.",
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.montserrat(fontSize: 12, color: Colors.grey[700]),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         final docs = snapshot.data!.docs;
         

@@ -30,6 +30,8 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
   final Map<String, int> _carrito = {};
   Map<String, dynamic>? _preciosConfig;
   late TabController _tabController;
+  bool _isBusinessActive = true;
+  StreamSubscription? _statusSub;
 
   @override
   void initState() {
@@ -37,6 +39,31 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
     _tabController = TabController(length: 4, vsync: this);
     _restaurarPedidoEdicion();
     _initOrderStatusListener();
+    _initBusinessStatusListener();
+  }
+
+  void _initBusinessStatusListener() {
+    _statusSub = FirebaseFirestore.instance
+        .collection('configuracion_negocio')
+        .doc('miguel_angel')
+        .snapshots()
+        .listen((snap) {
+      if (snap.exists) {
+        if (mounted) {
+          setState(() {
+            _isBusinessActive = snap.data()?['activo'] ?? true;
+          });
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _statusSub?.cancel();
+    _orderSubscription?.cancel();
+    _tabController.dispose();
+    super.dispose();
   }
 
   void _addToCart(String id) {
@@ -180,7 +207,7 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
         final data = doc.data() as Map<String, dynamic>? ?? {};
         final double price = _getRawPrice(data);
         subtotal += price * qty;
-        detalleText += "• $qty ${data['nombre']}\n";
+        detalleText += "• $qty ${data['nombre']} \$${price.toStringAsFixed(2).replaceAll('.', ',')}\n";
         productosData.add({
           'id': id,
           'nombre': data['nombre'],
@@ -702,11 +729,6 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
     );
   }
 
-  @override
-  void dispose() {
-    _orderSubscription?.cancel();
-    super.dispose();
-  }
 
   void _showRejectionAlert(String motivo) {
     showDialog(
@@ -759,8 +781,43 @@ class _ClientCartaScreenState extends State<ClientCartaScreen> with SingleTicker
 
   @override
   Widget build(BuildContext context) {
+    if (!_isBusinessActive) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF1A1A1A),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 80),
+                const SizedBox(height: 30),
+                Text(
+                  "SERVICIO SUSPENDIDO TEMPORALMENTE",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.montserrat(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  "Lo sentimos, este local no está aceptando pedidos web en este momento. Por favor contactate por otros medios.",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.montserrat(
+                    color: Colors.white70,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return StreamBuilder<DocumentSnapshot>(
-      // NUEVA FUENTE DE VERDAD: Colección config
       stream: FirebaseFirestore.instance.collection('config').doc('datos_local').snapshots(),
       builder: (context, configSnapshot) {
         if (!configSnapshot.hasData) return const Center(child: CircularProgressIndicator());
